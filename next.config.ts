@@ -11,6 +11,7 @@ try {
 
 const nextConfig: NextConfig = {
   serverExternalPackages: ["@earendil-works/pi-coding-agent", "@earendil-works/pi-ai"],
+  transpilePackages: ["@pi-web/enterprise-protocol"],
   allowedDevOrigins: ['192.168.*.*'],
   async headers() {
     return [

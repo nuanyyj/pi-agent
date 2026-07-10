@@ -11,6 +11,9 @@
     "url": "https://github.com/agegr/pi-web/issues"
   },
   "license": "MIT",
+  "workspaces": [
+    "packages/*"
+  ],
   "bin": {
     "pi-web": "bin/pi-web.js"
   },
@@ -29,11 +32,17 @@
     "build": "next build --webpack",
     "start": "next start -p 30141",
     "lint": "eslint .",
+    "typecheck": "tsc --noEmit && npm run typecheck --workspaces --if-present",
+    "test:unit": "vitest run",
+    "test:enterprise-imports": "node scripts/check-enterprise-imports.mjs",
+    "check:runtime-versions": "node scripts/check-enterprise-runtime-versions.mjs",
+    "check:enterprise": "npm run check:runtime-versions && npm run typecheck && npm run lint && npm run test:unit && npm run test:enterprise-imports",
+    "build:enterprise-packages": "npm run build --workspace @pi-web/enterprise-protocol && npm run build --workspace @pi-web/enterprise-worker",
     "release": "npm version patch --no-git-tag-version && npm run build && npm publish --access public"
   },
   "dependencies": {
-    "@earendil-works/pi-ai": "^0.80.6",
-    "@earendil-works/pi-coding-agent": "^0.80.6",
+    "@earendil-works/pi-ai": "0.80.6",
+    "@earendil-works/pi-coding-agent": "0.80.6",
     "@lobehub/icons": "^5.6.0",
     "@types/react-syntax-highlighter": "^15.5.13",
     "katex": "^0.16.47",
@@ -51,6 +60,7 @@
     "remark-math": "^6.0.0"
   },
   "devDependencies": {
+    "@playwright/test": "1.55.0",
     "@tailwindcss/postcss": "^4.2.2",
     "@types/node": "^25",
     "@types/react": "^19",
@@ -59,6 +69,8 @@
     "eslint-config-next": "16.2.9",
     "postcss": "^8",
     "tailwindcss": "^4.2.2",
-    "typescript": "^5"
+    "tsx": "4.22.1",
+    "typescript": "5.9.3",
+    "vitest": "4.1.9"
   }
 }
