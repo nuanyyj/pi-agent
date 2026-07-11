@@ -139,7 +139,7 @@ async function spawnWorker(record: RunRecord, body: RunBody, repo: Awaited<Retur
   const workerPath = join(process.cwd(), "packages", "enterprise-worker", "dist", "main.js");
 
   const child = spawn(process.execPath, [workerPath], {
-    env: { ...process.env, PI_RUN_ENVELOPE_PATH: envelopePath },
+    env: { ...process.env, PI_RUN_ENVELOPE_PATH: envelopePath, PI_RUN_ID: record.id, PI_POSTGRES_URL: process.env.PI_POSTGRES_URL },
     stdio: ["ignore", "pipe", "pipe"],
   });
 

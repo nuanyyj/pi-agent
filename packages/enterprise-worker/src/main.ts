@@ -2,12 +2,10 @@
 /**
  * Enterprise Worker — Phase 1A
  *
- * Reads a RunEnvelope from PI_RUN_ENVELOPE_PATH, validates it, and executes
- * the agent run against PostgreSQL-backed sessions.
- *
  * Environment variables:
  *   PI_RUN_ENVELOPE_PATH  — path to the RunEnvelope JSON file (required)
  *   PI_POSTGRES_URL       — PostgreSQL connection string (required)
+ *   PI_RUN_ID             — Run ID for PG event persistence (optional)
  *   OPENAI_API_KEY / ANTHROPIC_API_KEY / etc. — model provider API keys
  */
 import { runFromEnvelopePath } from "./run-executor.js";
@@ -19,9 +17,10 @@ async function main(): Promise<void> {
   const pgUrl = process.env.PI_POSTGRES_URL;
   if (!pgUrl) throw new Error("PI_POSTGRES_URL is required");
 
-  const result = await runFromEnvelopePath(envelopePath, pgUrl);
+  const runId = process.env.PI_RUN_ID; // optional
 
-  // Write result to stdout as JSON
+  const result = await runFromEnvelopePath(envelopePath, pgUrl, runId);
+
   process.stdout.write(JSON.stringify({
     response: result.response,
     eventCount: result.events.length,
