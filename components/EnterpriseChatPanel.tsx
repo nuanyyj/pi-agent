@@ -8,21 +8,19 @@ import type { AgentMessage } from "@/lib/types";
 
 /**
  * Enterprise chat panel that replaces the local ChatWindow when enterprise mode
- * is active. Uses MessageView for rich message rendering.
+ * is active. Receives a conversation from the parent sidebar.
  */
-export function EnterpriseChatPanel() {
+export function EnterpriseChatPanel({ conversation }: { conversation: EnterpriseConversation }) {
   const {
     isEnabled,
-    conversations,
-    conversationsLoading,
-    loadConversations,
-    createConversation,
     createRun,
     cancelRun,
     subscribeRunEvents,
   } = useEnterprise();
 
-  const [selectedConversation, setSelectedConversation] = useState<EnterpriseConversation | null>(null);
+  const conversationRef = useRef(conversation);
+  conversationRef.current = conversation;
+
   const [activeRun, setActiveRun] = useState<EnterpriseRun | null>(null);
   const [runEvents, setRunEvents] = useState<EnterpriseRunEvent[]>([]);
   const [messages, setMessages] = useState<AgentMessage[]>([]);
@@ -33,10 +31,13 @@ export function EnterpriseChatPanel() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const unsubscribeRef = useRef<(() => void) | null>(null);
 
-  // Load conversations on mount
+  // Reset messages when conversation changes
   useEffect(() => {
-    if (isEnabled) loadConversations();
-  }, [isEnabled, loadConversations]);
+    setMessages([]);
+    setRunEvents([]);
+    setActiveRun(null);
+    setIsRunning(false);
+  }, [conversation.id]);
 
   // Auto-scroll on new messages
   useEffect(() => {
@@ -54,39 +55,26 @@ export function EnterpriseChatPanel() {
   useEffect(() => {
     if (runEvents.length === 0) return;
     const { messages: mapped } = mapEventsToMessages(runEvents);
-    // Merge: keep user messages we already have, add mapped assistant/tool messages
     setMessages((prev) => {
       const userMsgs = prev.filter((m) => m.role === "user");
       return [...userMsgs, ...mapped];
     });
   }, [runEvents]);
 
-  const handleCreateConversation = useCallback(async () => {
-    try {
-      const conv = await createConversation();
-      setSelectedConversation(conv);
-      setMessages([]);
-      setRunEvents([]);
-    } catch (err) {
-      console.error("[enterprise] create conversation failed:", err);
-    }
-  }, [createConversation]);
-
   const handleSend = useCallback(async () => {
-    if (!inputValue.trim() || !selectedConversation || isRunning) return;
+    if (!inputValue.trim() || isRunning) return;
 
     const userInput = inputValue.trim();
     setInputValue("");
     setIsRunning(true);
     setRunEvents([]);
 
-    // Add user message optimistically
     const userMsg = createUserMessage(userInput);
     setMessages((prev) => [...prev, userMsg]);
 
     try {
       const run = await createRun({
-        conversationId: selectedConversation.id,
+        conversationId: conversationRef.current.id,
         modelProvider,
         modelId,
         userInput,
@@ -94,7 +82,6 @@ export function EnterpriseChatPanel() {
 
       setActiveRun(run);
 
-      // Subscribe to SSE events
       const unsubscribe = subscribeRunEvents(
         run.id,
         (event) => {
@@ -123,7 +110,7 @@ export function EnterpriseChatPanel() {
       console.error("[enterprise] create run failed:", err);
       setIsRunning(false);
     }
-  }, [inputValue, selectedConversation, isRunning, modelProvider, modelId, createRun, subscribeRunEvents]);
+  }, [inputValue, isRunning, modelProvider, modelId, createRun, subscribeRunEvents]);
 
   const handleCancel = useCallback(async () => {
     if (!activeRun) return;
@@ -139,44 +126,20 @@ export function EnterpriseChatPanel() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "var(--bg)" }}>
-      {/* Conversation selector */}
+      {/* Conversation header */}
       <div style={{
         display: "flex", alignItems: "center", gap: 8,
         padding: "8px 12px", borderBottom: "1px solid var(--border)",
         background: "var(--bg-panel)", flexShrink: 0,
       }}>
-        <select
-          value={selectedConversation?.id ?? ""}
-          onChange={(e) => {
-            const conv = conversations.find((c) => c.id === e.target.value);
-            setSelectedConversation(conv ?? null);
-            setMessages([]);
-            setRunEvents([]);
-          }}
-          style={{
-            flex: 1, height: 28, fontSize: 12,
-            background: "var(--bg)", color: "var(--text)",
-            border: "1px solid var(--border)", borderRadius: 4,
-            padding: "0 6px",
-          }}
-        >
-          <option value="">Select conversation...</option>
-          {conversations.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.id.slice(0, 8)}... ({c.organizationId})
-            </option>
-          ))}
-        </select>
-        <button
-          onClick={handleCreateConversation}
-          style={{
-            height: 28, padding: "0 10px", fontSize: 11,
-            background: "var(--accent)", color: "#fff",
-            border: "none", borderRadius: 4, cursor: "pointer",
-          }}
-        >
-          + New
-        </button>
+        <span style={{
+          fontSize: 12, fontFamily: "var(--font-mono)", color: "var(--text-muted)",
+        }}>
+          {conversation.id.slice(0, 12)}…
+        </span>
+        <span style={{ fontSize: 10, color: "var(--text-dim)" }}>
+          {conversation.organizationId}
+        </span>
       </div>
 
       {/* Model selector */}
@@ -213,13 +176,11 @@ export function EnterpriseChatPanel() {
         />
       </div>
 
-      {/* Messages area — uses MessageView for rich rendering */}
+      {/* Messages area */}
       <div style={{ flex: 1, overflowY: "auto", padding: "12px 16px" }}>
         {messages.length === 0 && !isRunning && (
           <div style={{ color: "var(--text-muted)", fontSize: 13, textAlign: "center", marginTop: 40 }}>
-            {selectedConversation
-              ? "Send a message to start a run"
-              : "Select or create a conversation to begin"}
+            Send a message to start a run
           </div>
         )}
 
@@ -272,8 +233,7 @@ export function EnterpriseChatPanel() {
               handleSend();
             }
           }}
-          placeholder={selectedConversation ? "Type a message..." : "Select a conversation first"}
-          disabled={!selectedConversation}
+          placeholder="Type a message..."
           rows={1}
           style={{
             flex: 1, resize: "none", fontSize: 13,
@@ -296,12 +256,12 @@ export function EnterpriseChatPanel() {
         ) : (
           <button
             onClick={handleSend}
-            disabled={!selectedConversation || !inputValue.trim()}
+            disabled={!inputValue.trim()}
             style={{
               height: 36, padding: "0 14px", fontSize: 12,
-              background: selectedConversation && inputValue.trim() ? "var(--accent)" : "var(--border)",
+              background: inputValue.trim() ? "var(--accent)" : "var(--border)",
               color: "#fff", border: "none", borderRadius: 6,
-              cursor: selectedConversation && inputValue.trim() ? "pointer" : "default",
+              cursor: inputValue.trim() ? "pointer" : "default",
             }}
           >
             Send

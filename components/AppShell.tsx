@@ -312,7 +312,7 @@ export function AppShell() {
 
   // Show chat area if a session is selected, or if we have a cwd to start a new session in
   const effectiveNewSessionCwd = newSessionCwd ?? (selectedSession === null && activeCwd ? activeCwd : null);
-  const showChat = selectedSession !== null || effectiveNewSessionCwd !== null;
+  const showChat = enterpriseMode || selectedSession !== null || effectiveNewSessionCwd !== null;
   // While restoring initial session from URL, don't show the placeholder
   const showPlaceholder = initialSessionRestored && !showChat;
 
@@ -320,6 +320,18 @@ export function AppShell() {
 
   const sidebarContent = (
     <>
+      {enterpriseMode ? (
+        <EnterpriseConversationList
+          selectedConversationId={selectedEnterpriseConversation?.id ?? null}
+          onSelectConversation={setSelectedEnterpriseConversation}
+          onNewConversation={async () => {
+            const conv = await enterprise.createConversation();
+            setSelectedEnterpriseConversation(conv);
+            setEnterpriseRefreshKey((k) => k + 1);
+          }}
+          refreshKey={enterpriseRefreshKey}
+        />
+      ) : (
       <SessionSidebar
         selectedSessionId={selectedSession?.id ?? null}
         onSelectSession={handleSelectSession}
@@ -334,6 +346,8 @@ export function AppShell() {
         explorerRefreshKey={explorerRefreshKey}
         onAtMention={handleAtMention}
       />
+      )}
+      {/* Bottom toolbar — shown in both modes */}
       <div style={{ padding: "8px", flexShrink: 0, display: "flex", justifyContent: "space-between", gap: 4 }}>
         {([
           {
@@ -974,7 +988,13 @@ export function AppShell() {
         {/* Chat content */}
         <div style={{ flex: 1, overflow: "hidden", position: "relative" }}>
           {showChat && enterpriseMode ? (
-            <EnterpriseChatPanel />
+            selectedEnterpriseConversation ? (
+              <EnterpriseChatPanel conversation={selectedEnterpriseConversation} />
+            ) : (
+              <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontSize: 14 }}>
+                Select or create a conversation from the sidebar
+              </div>
+            )
           ) : showChat ? (
             <ChatWindow
               key={sessionKey}
@@ -1089,3 +1109,7 @@ export function AppShell() {
     </>
   );
 }
+import { EnterpriseConversationList } from "./EnterpriseConversationList";
+import type { EnterpriseConversation } from "@/hooks/useEnterprise";
+  const [selectedEnterpriseConversation, setSelectedEnterpriseConversation] = useState<EnterpriseConversation | null>(null);
+  const [enterpriseRefreshKey, setEnterpriseRefreshKey] = useState(0);
