@@ -4,6 +4,7 @@ import { isEnterpriseEnabled } from "@/lib/enterprise/db";
 import { getRunRepository, type RunRecord } from "@/lib/enterprise/run-repo";
 import { checkRateLimit, getClientKey } from "@/lib/enterprise/rate-limit";
 import { authenticateRequest } from "@/lib/enterprise/auth";
+import { checkQuota, recordUsage } from "@/lib/enterprise/quota";
 import { requirePermission } from "@/lib/enterprise/rbac";
 import { writeAuditEvent } from "@/lib/enterprise/audit-log";
 import { getEnterpriseDb } from "@/lib/enterprise/db";
@@ -56,6 +57,15 @@ export async function POST(req: Request) {
       );
     }
 
+    // Quota check
+    const db = await getEnterpriseDb().catch(() => null);
+    if (db) {
+      const quotaCheck = await checkQuota(db, body.organizationId ?? "default");
+      if (!quotaCheck.allowed) {
+        return NextResponse.json({ error: quotaCheck.reason }, { status: 429 });
+      }
+    }
+
     const repo = await getRunRepository();
     const runId = randomUUID();
     const now = new Date().toISOString();
@@ -73,6 +83,19 @@ export async function POST(req: Request) {
     };
 
     await repo.createRun(record);
+
+    // Record usage — fire-and-forget
+    if (db) {
+      recordUsage(db, {
+        organizationId: record.organizationId,
+        userId: auth.user.id,
+        runId,
+        tokensIn: 0,
+        tokensOut: 0,
+        modelProvider: body.modelProvider,
+        modelId: body.modelId,
+      }).catch(() => {});
+    }
 
     // Audit log — fire-and-forget
     const auditDb = await getEnterpriseDb().catch(() => null);

@@ -8,6 +8,7 @@
 
 import type { AgentMessage, ToolResultMessage } from "@/lib/types";
 import type { EnterpriseRunEvent } from "@/hooks/useEnterprise";
+import { sanitizeString } from "@/lib/enterprise/sanitizer";
 
 interface MappedMessages {
   messages: AgentMessage[];
@@ -102,16 +103,17 @@ function normalizeMessage(msg: AgentMessage): AgentMessage {
 
 /**
  * Format tool execution result for display.
+ * Sanitizes output to prevent credential leakage in SSE events / PG storage.
  */
 function formatToolResult(data: Record<string, unknown>): string {
-  if (data.error) return `Error: ${data.error}`;
+  if (data.error) return `Error: ${sanitizeString(String(data.error))}`;
   if (data.result !== undefined) {
     const r = data.result;
-    if (typeof r === "string") return r;
+    if (typeof r === "string") return sanitizeString(r);
     try {
-      return JSON.stringify(r, null, 2);
+      return sanitizeString(JSON.stringify(r, null, 2));
     } catch {
-      return String(r);
+      return sanitizeString(String(r));
     }
   }
   return "(no result)";

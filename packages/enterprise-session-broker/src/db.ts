@@ -173,4 +173,32 @@ async function ensureSchema(client: Client): Promise<void> {
     create index if not exists enterprise_audit_resource_idx
       on enterprise_audit_events(resource_type, resource_id)
   `);
+
+  // Quota management tables
+  await client.query(`
+    create table if not exists enterprise_quotas (
+      organization_id text primary key,
+      max_runs_per_day integer not null default 100,
+      max_runs_per_hour integer not null default 20,
+      max_concurrent_runs integer not null default 5,
+      updated_at timestamptz not null default now()
+    )
+  `);
+  await client.query(`
+    create table if not exists enterprise_usage (
+      id bigserial primary key,
+      organization_id text not null,
+      user_id text not null,
+      run_id text not null,
+      tokens_in bigint not null default 0,
+      tokens_out bigint not null default 0,
+      model_provider text not null,
+      model_id text not null,
+      recorded_at timestamptz not null default now()
+    )
+  `);
+  await client.query(`
+    create index if not exists enterprise_usage_org_idx
+      on enterprise_usage(organization_id, recorded_at desc)
+  `);
 }

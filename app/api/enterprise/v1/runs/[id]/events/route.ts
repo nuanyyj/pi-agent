@@ -1,6 +1,7 @@
 import { getEnterpriseDb, isEnterpriseEnabled } from "@/lib/enterprise/db";
 import { getRunRepository } from "@/lib/enterprise/run-repo";
 import { Client } from "pg";
+import { sanitizeObject } from "@/lib/enterprise/sanitizer";
 
 export const dynamic = "force-dynamic";
 
@@ -83,7 +84,7 @@ export async function GET(
       const sendEvent = (data: unknown) => {
         if (closed) return;
         try {
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(sanitizeObject(data))}\n\n`));
         } catch { closed = true; }
       };
 
