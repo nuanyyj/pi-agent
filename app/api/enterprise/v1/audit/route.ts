@@ -1,0 +1,59 @@
+import { NextResponse } from "next/server";
+import { sanitizeError } from "@/lib/api-errors";
+import { getEnterpriseDb, isEnterpriseEnabled } from "@/lib/enterprise/db";
+import { queryAuditEvents, type AuditAction, type AuditResourceType } from "@/lib/enterprise/audit-log";
+import { checkRateLimit, getClientKey } from "@/lib/enterprise/rate-limit";
+
+/**
+ * GET /api/enterprise/v1/audit
+ * Query enterprise audit events.
+ * Query params:
+ *   organizationId — filter by org
+ *   resourceType   — filter by resource type (conversation | run)
+ *   resourceId     — filter by specific resource ID
+ *   action         — filter by action name
+ *   limit          — max results (default 50, max 200)
+ *   offset         — pagination offset
+ */
+export async function GET(req: Request) {
+  if (!checkRateLimit(`audit:${getClientKey(req)}`, 30, 60_000)) {
+    return NextResponse.json({ error: "Too many requests" }, { status: 429 });
+  }
+
+  if (!isEnterpriseEnabled()) {
+    return NextResponse.json({ error: "Enterprise mode not enabled" }, { status: 503 });
+  }
+
+  try {
+    const url = new URL(req.url);
+    const organizationId = url.searchParams.get("organizationId") ?? undefined;
+    const resourceType = url.searchParams.get("resourceType") as AuditResourceType | null;
+    const resourceId = url.searchParams.get("resourceId") ?? undefined;
+    const action = url.searchParams.get("action") as AuditAction | null;
+    const limit = url.searchParams.get("limit") ? Number(url.searchParams.get("limit")) : undefined;
+    const offset = url.searchParams.get("offset") ? Number(url.searchParams.get("offset")) : undefined;
+
+    const db = await getEnterpriseDb();
+    if (!db) {
+      return NextResponse.json({ error: "Enterprise database not available" }, { status: 503 });
+    }
+
+    const result = await queryAuditEvents(db, {
+      organizationId,
+      resourceType: resourceType ?? undefined,
+      resourceId,
+      action: action ?? undefined,
+      limit,
+      offset,
+    });
+
+    return NextResponse.json({
+      events: result.events,
+      total: result.total,
+      limit: limit ?? 50,
+      offset: offset ?? 0,
+    });
+  } catch (error) {
+    return NextResponse.json({ error: sanitizeError(error) }, { status: 500 });
+  }
+}

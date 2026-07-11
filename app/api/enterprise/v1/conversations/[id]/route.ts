@@ -3,6 +3,7 @@ import { sanitizeError } from "@/lib/api-errors";
 import { getEnterpriseDb, isEnterpriseEnabled } from "@/lib/enterprise/db";
 import { createSessionBroker } from "@pi-web/enterprise-session-broker";
 import { checkRateLimit, getClientKey } from "@/lib/enterprise/rate-limit";
+import { writeAuditEvent } from "@/lib/enterprise/audit-log";
 
 /**
  * GET /api/enterprise/v1/conversations/[id]
@@ -84,6 +85,16 @@ export async function DELETE(
     for (const run of runs) {
       await repo.deleteRun(run.id);
     }
+
+    // Audit log
+    writeAuditEvent(db, {
+      organizationId,
+      action: "conversation.deleted",
+      resourceType: "conversation",
+      resourceId: id,
+      details: { runsDeleted: runs.length },
+      ipAddress: getClientKey(req),
+    }).catch(() => {});
 
     return NextResponse.json({ deleted: true, runsDeleted: runs.length });
   } catch (error) {

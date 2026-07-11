@@ -1,16 +1,22 @@
 import { NextResponse } from "next/server";
 import { sanitizeError } from "@/lib/api-errors";
-import { isEnterpriseEnabled } from "@/lib/enterprise/db";
+import { getEnterpriseDb, isEnterpriseEnabled } from "@/lib/enterprise/db";
 import { getRunRepository } from "@/lib/enterprise/run-repo";
+import { writeAuditEvent } from "@/lib/enterprise/audit-log";
+import { checkRateLimit, getClientKey } from "@/lib/enterprise/rate-limit";
 
 /**
  * POST /api/enterprise/v1/runs/[id]/cancel
  * Cancel a running enterprise run.
  */
 export async function POST(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  if (!checkRateLimit(`run-cancel:${getClientKey(req)}`, 30, 60_000)) {
+    return NextResponse.json({ error: "Too many requests" }, { status: 429 });
+  }
+
   if (!isEnterpriseEnabled()) {
     return NextResponse.json({ error: "Enterprise mode not enabled" }, { status: 503 });
   }
@@ -31,13 +37,25 @@ export async function POST(
       );
     }
 
-    // Signal abort if controller exists (in-memory mode)
     repo.getAbortController(id)?.abort();
 
     await repo.updateRun(id, {
       status: "cancelled",
       completedAt: new Date().toISOString(),
     });
+
+    // Audit log — fire-and-forget
+    const db = await getEnterpriseDb().catch(() => null);
+    if (db) {
+      writeAuditEvent(db, {
+        organizationId: run.organizationId,
+        action: "run.cancelled",
+        resourceType: "run",
+        resourceId: id,
+        details: { conversationId: run.conversationId },
+        ipAddress: getClientKey(req),
+      }).catch(() => {});
+    }
 
     return NextResponse.json({ id, status: "cancelled" });
   } catch (error) {

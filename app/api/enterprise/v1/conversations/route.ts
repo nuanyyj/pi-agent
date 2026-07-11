@@ -3,6 +3,7 @@ import { sanitizeError } from "@/lib/api-errors";
 import { getEnterpriseDb, isEnterpriseEnabled } from "@/lib/enterprise/db";
 import { createSessionBroker, PostgresSessionRepo } from "@pi-web/enterprise-session-broker";
 import { checkRateLimit, getClientKey } from "@/lib/enterprise/rate-limit";
+import { writeAuditEvent } from "@/lib/enterprise/audit-log";
 import { randomUUID } from "node:crypto";
 
 /**
@@ -45,6 +46,16 @@ export async function POST(req: Request) {
     });
 
     const metadata = await session.getMetadata();
+
+    // Audit log
+    writeAuditEvent(db, {
+      organizationId,
+      action: "conversation.created",
+      resourceType: "conversation",
+      resourceId: conversationId,
+      details: { workspaceRoot },
+      ipAddress: getClientKey(req),
+    }).catch(() => {});
 
     return NextResponse.json({
       id: metadata.id,

@@ -151,4 +151,26 @@ async function ensureSchema(client: Client): Promise<void> {
       primary key (run_id, seq)
     )
   `);
+  // Audit log — append-only
+  await client.query(`
+    create table if not exists enterprise_audit_events (
+      id bigserial primary key,
+      organization_id text not null,
+      actor_id text not null default 'system',
+      action text not null,
+      resource_type text not null,
+      resource_id text not null,
+      details jsonb not null default '{}'::jsonb,
+      ip_address text null,
+      recorded_at timestamptz not null default now()
+    )
+  `);
+  await client.query(`
+    create index if not exists enterprise_audit_org_idx
+      on enterprise_audit_events(organization_id, recorded_at desc)
+  `);
+  await client.query(`
+    create index if not exists enterprise_audit_resource_idx
+      on enterprise_audit_events(resource_type, resource_id)
+  `);
 }

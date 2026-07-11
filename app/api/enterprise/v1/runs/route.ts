@@ -3,6 +3,8 @@ import { sanitizeError } from "@/lib/api-errors";
 import { isEnterpriseEnabled } from "@/lib/enterprise/db";
 import { getRunRepository, type RunRecord } from "@/lib/enterprise/run-repo";
 import { checkRateLimit, getClientKey } from "@/lib/enterprise/rate-limit";
+import { writeAuditEvent } from "@/lib/enterprise/audit-log";
+import { getEnterpriseDb } from "@/lib/enterprise/db";
 import { randomUUID } from "node:crypto";
 import { writeFile, mkdtemp } from "node:fs/promises";
 import { join } from "node:path";
@@ -59,6 +61,19 @@ export async function POST(req: Request) {
     };
 
     await repo.createRun(record);
+
+    // Audit log — fire-and-forget
+    const auditDb = await getEnterpriseDb().catch(() => null);
+    if (auditDb) {
+      writeAuditEvent(auditDb, {
+        organizationId: record.organizationId,
+        action: "run.created",
+        resourceType: "run",
+        resourceId: runId,
+        details: { conversationId: body.conversationId, modelProvider: body.modelProvider, modelId: body.modelId },
+        ipAddress: getClientKey(req),
+      }).catch(() => {});
+    }
 
     // Spawn worker process asynchronously
     spawnWorker(record, body, repo).catch((err) => {
