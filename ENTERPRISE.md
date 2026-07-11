@@ -113,7 +113,7 @@ Browser → Next.js (control plane) → PostgreSQL (state)
 | `GET` | `/api/enterprise/v1/runs/[id]/artifacts` | List run artifacts |
 | `POST` | `/api/enterprise/v1/runs/[id]/artifacts` | Upload artifact |
 | `GET` | `/api/enterprise/v1/artifacts?key=...` | Download artifact |
-| `GET` | `/api/enterprise/v1/audit` | Query audit events |
+| `GET` | `/api/enterprise/v1/audit` | Query audit events`n| `GET` | `/api/enterprise/v1/quota` | Get quota config + usage summary`n| `PUT` | `/api/enterprise/v1/quota` | Update quota limits (requires config:manage)`n| `GET` | `/api/enterprise/v1/users` | List organization users`n| `POST` | `/api/enterprise/v1/users` | Create/update user (requires user:manage)`n| `GET` | `/api/enterprise/v1/health` | Health check endpoint |
 
 ## Database Schema
 
@@ -124,4 +124,4 @@ Tables created automatically on first connection:
 - `enterprise_runs` — Run records with status lifecycle
 - `enterprise_run_events` — Streaming events per run
 - `enterprise_audit_events` — Append-only audit log
-- `enterprise_schema_migrations` — Schema version tracking
+- `enterprise_quotas` — Per-organization quota limits (runs/day, runs/hour, concurrent)`n- `enterprise_usage` — Token usage tracking per run (tokens_in, tokens_out)`n- `enterprise_schema_migrations` — Schema version tracking
