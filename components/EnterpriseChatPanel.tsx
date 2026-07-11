@@ -2,24 +2,22 @@
 
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useEnterprise, type EnterpriseConversation, type EnterpriseRun, type EnterpriseRunEvent } from "@/hooks/useEnterprise";
-import { ChatWindow } from "./ChatWindow";
-import type { SessionInfo } from "@/lib/types";
+import { MessageView } from "./MessageView";
+import { mapEventsToMessages, createUserMessage } from "@/lib/enterprise/event-mapper";
+import type { AgentMessage } from "@/lib/types";
 
 /**
  * Enterprise chat panel that replaces the local ChatWindow when enterprise mode
- * is active. Manages enterprise conversations and runs, renders events via the
- * existing ChatWindow component.
+ * is active. Uses MessageView for rich message rendering.
  */
 export function EnterpriseChatPanel() {
   const {
     isEnabled,
-    organizationId,
     conversations,
     conversationsLoading,
     loadConversations,
     createConversation,
     createRun,
-    getRun,
     cancelRun,
     subscribeRunEvents,
   } = useEnterprise();
@@ -27,26 +25,48 @@ export function EnterpriseChatPanel() {
   const [selectedConversation, setSelectedConversation] = useState<EnterpriseConversation | null>(null);
   const [activeRun, setActiveRun] = useState<EnterpriseRun | null>(null);
   const [runEvents, setRunEvents] = useState<EnterpriseRunEvent[]>([]);
+  const [messages, setMessages] = useState<AgentMessage[]>([]);
   const [inputValue, setInputValue] = useState("");
   const [isRunning, setIsRunning] = useState(false);
   const [modelProvider, setModelProvider] = useState("openai");
   const [modelId, setModelId] = useState("gpt-4o");
-  const eventsEndRef = useRef<HTMLDivElement>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const unsubscribeRef = useRef<(() => void) | null>(null);
 
   // Load conversations on mount
   useEffect(() => {
     if (isEnabled) loadConversations();
   }, [isEnabled, loadConversations]);
 
-  // Auto-scroll on new events
+  // Auto-scroll on new messages
   useEffect(() => {
-    eventsEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, runEvents]);
+
+  // Cleanup SSE subscription on unmount
+  useEffect(() => {
+    return () => {
+      unsubscribeRef.current?.();
+    };
+  }, []);
+
+  // Re-derive messages when events change
+  useEffect(() => {
+    if (runEvents.length === 0) return;
+    const { messages: mapped } = mapEventsToMessages(runEvents);
+    // Merge: keep user messages we already have, add mapped assistant/tool messages
+    setMessages((prev) => {
+      const userMsgs = prev.filter((m) => m.role === "user");
+      return [...userMsgs, ...mapped];
+    });
   }, [runEvents]);
 
   const handleCreateConversation = useCallback(async () => {
     try {
       const conv = await createConversation();
       setSelectedConversation(conv);
+      setMessages([]);
+      setRunEvents([]);
     } catch (err) {
       console.error("[enterprise] create conversation failed:", err);
     }
@@ -59,6 +79,10 @@ export function EnterpriseChatPanel() {
     setInputValue("");
     setIsRunning(true);
     setRunEvents([]);
+
+    // Add user message optimistically
+    const userMsg = createUserMessage(userInput);
+    setMessages((prev) => [...prev, userMsg]);
 
     try {
       const run = await createRun({
@@ -79,11 +103,22 @@ export function EnterpriseChatPanel() {
         (status, response, error) => {
           setIsRunning(false);
           setActiveRun((prev) => prev ? { ...prev, status: status as EnterpriseRun["status"], response, error } : null);
+          if (status === "completed" && response) {
+            setMessages((prev) => {
+              const hasAssistant = prev.some((m) => m.role === "assistant");
+              if (hasAssistant) return prev;
+              return [...prev, {
+                role: "assistant" as const,
+                content: [{ type: "text" as const, text: response }],
+                model: modelId,
+                provider: modelProvider,
+              }];
+            });
+          }
         },
       );
 
-      // Store unsubscribe for cleanup
-      return () => unsubscribe();
+      unsubscribeRef.current = unsubscribe;
     } catch (err) {
       console.error("[enterprise] create run failed:", err);
       setIsRunning(false);
@@ -115,6 +150,8 @@ export function EnterpriseChatPanel() {
           onChange={(e) => {
             const conv = conversations.find((c) => c.id === e.target.value);
             setSelectedConversation(conv ?? null);
+            setMessages([]);
+            setRunEvents([]);
           }}
           style={{
             flex: 1, height: 28, fontSize: 12,
@@ -176,9 +213,9 @@ export function EnterpriseChatPanel() {
         />
       </div>
 
-      {/* Events / messages area */}
+      {/* Messages area — uses MessageView for rich rendering */}
       <div style={{ flex: 1, overflowY: "auto", padding: "12px 16px" }}>
-        {runEvents.length === 0 && !isRunning && (
+        {messages.length === 0 && !isRunning && (
           <div style={{ color: "var(--text-muted)", fontSize: 13, textAlign: "center", marginTop: 40 }}>
             {selectedConversation
               ? "Send a message to start a run"
@@ -186,52 +223,23 @@ export function EnterpriseChatPanel() {
           </div>
         )}
 
-        {runEvents.map((event) => (
-          <div
-            key={event.seq}
-            style={{
-              marginBottom: 8,
-              padding: "6px 10px",
-              borderRadius: 6,
-              fontSize: 12,
-              background: event.type === "tool_execution_start"
-                ? "rgba(59,130,246,0.08)"
-                : event.type === "tool_execution_end"
-                  ? "rgba(34,197,94,0.08)"
-                  : "var(--bg-panel)",
-              border: "1px solid var(--border)",
-            }}
-          >
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 2 }}>
-              <span style={{ fontWeight: 500, color: "var(--accent)" }}>{event.type}</span>
-              <span style={{ color: "var(--text-muted)", fontSize: 10 }}>
-                {new Date(event.timestamp).toLocaleTimeString()}
-              </span>
-            </div>
-            <pre style={{
-              margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-all",
-              fontSize: 11, color: "var(--text-muted)", maxHeight: 200, overflow: "auto",
-            }}>
-              {JSON.stringify(event.data, null, 2)}
-            </pre>
+        {messages.map((msg, i) => (
+          <div key={i} style={{ marginBottom: 12 }}>
+            <MessageView message={msg} />
           </div>
         ))}
 
         {isRunning && (
-          <div style={{ color: "var(--text-muted)", fontSize: 12, padding: "8px 0" }}>
-            <span style={{ animation: "pulse 1.5s infinite" }}>⏳ Running...</span>
-          </div>
-        )}
-
-        {activeRun?.status === "completed" && activeRun.response && (
           <div style={{
-            marginTop: 8, padding: "10px 14px",
-            background: "rgba(34,197,94,0.06)",
-            border: "1px solid rgba(34,197,94,0.2)",
-            borderRadius: 8, fontSize: 13,
+            display: "flex", alignItems: "center", gap: 8,
+            padding: "8px 12px", color: "var(--text-muted)", fontSize: 12,
           }}>
-            <div style={{ fontWeight: 500, marginBottom: 4, color: "#22c55e" }}>Response</div>
-            <div style={{ whiteSpace: "pre-wrap" }}>{activeRun.response}</div>
+            <span style={{
+              display: "inline-block", width: 8, height: 8,
+              borderRadius: "50%", background: "var(--accent)",
+              animation: "pulse 1.5s ease-in-out infinite",
+            }} />
+            Running...
           </div>
         )}
 
@@ -246,7 +254,7 @@ export function EnterpriseChatPanel() {
           </div>
         )}
 
-        <div ref={eventsEndRef} />
+        <div ref={messagesEndRef} />
       </div>
 
       {/* Input area */}

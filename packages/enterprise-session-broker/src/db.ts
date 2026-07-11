@@ -115,4 +115,40 @@ async function ensureSchema(client: Client): Promise<void> {
     create index if not exists enterprise_session_entries_parent_idx
       on enterprise_session_entries(session_id, parent_id)
   `);
+  // Enterprise runs and run events
+  await client.query(`
+    create table if not exists enterprise_runs (
+      id text primary key,
+      conversation_id text not null,
+      organization_id text not null,
+      status text not null default 'pending',
+      model_provider text not null,
+      model_id text not null,
+      user_input text not null,
+      response text null,
+      error text null,
+      worker_pid integer null,
+      created_at timestamptz not null default now(),
+      started_at timestamptz null,
+      completed_at timestamptz null
+    )
+  `);
+  await client.query(`
+    create index if not exists enterprise_runs_conversation_idx
+      on enterprise_runs(conversation_id)
+  `);
+  await client.query(`
+    create index if not exists enterprise_runs_org_idx
+      on enterprise_runs(organization_id, created_at desc)
+  `);
+  await client.query(`
+    create table if not exists enterprise_run_events (
+      run_id text not null references enterprise_runs(id) on delete cascade,
+      seq integer not null,
+      event_type text not null,
+      event_data jsonb not null,
+      recorded_at timestamptz not null default now(),
+      primary key (run_id, seq)
+    )
+  `);
 }
