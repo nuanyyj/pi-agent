@@ -4,6 +4,7 @@ import { getEnterpriseDb, isEnterpriseEnabled } from "@/lib/enterprise/db";
 import { getRunRepository } from "@/lib/enterprise/run-repo";
 import { writeAuditEvent } from "@/lib/enterprise/audit-log";
 import { checkRateLimit, getClientKey } from "@/lib/enterprise/rate-limit";
+import { execSync } from "node:child_process";
 
 /**
  * POST /api/enterprise/v1/runs/[id]/cancel
@@ -38,6 +39,21 @@ export async function POST(
     }
 
     repo.getAbortController(id)?.abort();
+
+    // Kill Docker container if in docker mode
+    if (process.env.PI_WORKER_MODE === "docker") {
+      try {
+        const containers = execSync(
+          "docker ps -q --filter label=pi-run-id=" + id,
+          { encoding: "utf8", timeout: 5000 }
+        ).trim();
+        if (containers) {
+          for (const cid of containers.split("\n")) {
+            execSync("docker kill " + cid, { timeout: 5000 });
+          }
+        }
+      } catch { /* container may already be stopped */ }
+    }
 
     await repo.updateRun(id, {
       status: "cancelled",

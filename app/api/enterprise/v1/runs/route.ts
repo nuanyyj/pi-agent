@@ -189,6 +189,7 @@ async function spawnWorker(record: RunRecord, body: RunBody, repo: Awaited<Retur
       "--memory", "512m",
       "--cpus", "1",
       "--read-only",
+      "--label", "pi-run-id=" + record.id,
       "--tmpfs", "/tmp:size=100m",
       "-e", `PI_RUN_ENVELOPE_PATH=/tmp/envelope.json`,
       "-e", `PI_RUN_ID=${record.id}`,
