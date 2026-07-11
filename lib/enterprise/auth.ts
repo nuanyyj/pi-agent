@@ -35,12 +35,13 @@ export type AuthResponse = AuthResult | AuthFailure;
 
 // ── Config ─────────────────────────────────────────────────────────────
 
-const AUTH_MODE = (process.env.PI_AUTH_MODE ?? "token").toLowerCase();
+const AUTH_MODE = (process.env.PI_AUTH_MODE ?? "oidc").toLowerCase();
 const STATIC_TOKEN = process.env.PI_AUTH_TOKEN ?? "";
 
 // OIDC config (only used when AUTH_MODE=oidc)
 const OIDC_ISSUER = process.env.PI_OIDC_ISSUER ?? "";
 const OIDC_AUDIENCE = process.env.PI_OIDC_AUDIENCE ?? "";
+const OIDC_ROLES_CLAIM = process.env.PI_OIDC_ROLES_CLAIM ?? "roles";
 
 // ── Token auth ─────────────────────────────────────────────────────────
 
@@ -129,7 +130,7 @@ async function authenticateOidc(authHeader: string | null): Promise<AuthResponse
       email: payload.email,
       name: payload.name ?? payload.preferred_username,
       organizationId: payload.org_id ?? payload.organization,
-      roles: Array.isArray(payload.roles) ? payload.roles : undefined,
+      roles: Array.isArray(payload[OIDC_ROLES_CLAIM]) ? (payload[OIDC_ROLES_CLAIM] as string[]) : undefined,
     };
 
     return { ok: true, user };
