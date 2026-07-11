@@ -321,6 +321,7 @@ export function AppShell() {
   const sidebarContent = (
     <>
       {enterpriseMode ? (
+        <>
         <EnterpriseConversationList
           selectedConversationId={selectedEnterpriseConversation?.id ?? null}
           onSelectConversation={setSelectedEnterpriseConversation}
@@ -341,6 +342,27 @@ export function AppShell() {
           }}
           refreshKey={enterpriseRefreshKey}
         />
+        {/* Audit log button — enterprise mode only */}
+        <div style={{ padding: "4px 10px", flexShrink: 0 }}>
+          <button
+            onClick={() => setEnterpriseView(enterpriseView === "audit" ? "chat" : "audit")}
+            style={{
+              width: "100%", height: 30, fontSize: 12,
+              background: enterpriseView === "audit" ? "var(--accent)" : "transparent",
+              color: enterpriseView === "audit" ? "#fff" : "var(--text-muted)",
+              border: "1px solid var(--border)", borderRadius: 6,
+              cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+              transition: "background 0.12s, color 0.12s",
+            }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+              <polyline points="14 2 14 8 20 8" />
+            </svg>
+            Audit Log
+          </button>
+        </div>
+        </>
       ) : (
       <SessionSidebar
         selectedSessionId={selectedSession?.id ?? null}
@@ -534,7 +556,7 @@ export function AppShell() {
             <EnterpriseBadge />
             {enterprise.isEnabled && (
               <button
-                onClick={() => setEnterpriseMode(!enterpriseMode)}
+                onClick={() => { setEnterpriseMode(!enterpriseMode); setEnterpriseView("chat"); }}
                 style={{
                   display: "flex", alignItems: "center", justifyContent: "center",
                   height: 36, padding: "0 10px", fontSize: 11,
@@ -997,7 +1019,9 @@ export function AppShell() {
 
         {/* Chat content */}
         <div style={{ flex: 1, overflow: "hidden", position: "relative" }}>
-          {showChat && enterpriseMode ? (
+          {showChat && enterpriseMode && enterpriseView === "audit" ? (
+            <EnterpriseAuditLog organizationId={enterprise.organizationId} />
+          ) : showChat && enterpriseMode ? (
             selectedEnterpriseConversation ? (
               <EnterpriseChatPanel conversation={selectedEnterpriseConversation} />
             ) : (
@@ -1120,6 +1144,8 @@ export function AppShell() {
   );
 }
 import { EnterpriseConversationList } from "./EnterpriseConversationList";
+import { EnterpriseAuditLog } from "./EnterpriseAuditLog";
 import type { EnterpriseConversation } from "@/hooks/useEnterprise";
   const [selectedEnterpriseConversation, setSelectedEnterpriseConversation] = useState<EnterpriseConversation | null>(null);
   const [enterpriseRefreshKey, setEnterpriseRefreshKey] = useState(0);
+  const [enterpriseView, setEnterpriseView] = useState<"chat" | "audit">("chat");
