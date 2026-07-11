@@ -66,49 +66,27 @@ function authenticateToken(authHeader: string | null): AuthResponse {
   return { ok: true, user: { id: "token-user" } };
 }
 
-// ── OIDC auth ──────────────────────────────────────────────────────────
+// ── OIDC auth (with jose for full signature verification) ────────────
 
-// Cached JWKS and discovery document
-let _oidcJwks: { keys: Array<{ kid: string; kty: string; [key: string]: unknown }> } | null = null;
-let _oidcJwksExpiry = 0;
+import { createRemoteJWKSet, jwtVerify, type JWTPayload } from "jose";
 
-async function fetchOidcJwks(): Promise<typeof _oidcJwks> {
-  if (_oidcJwks && Date.now() < _oidcJwksExpiry) return _oidcJwks;
+let _jwks: ReturnType<typeof createRemoteJWKSet> | null = null;
 
-  if (!OIDC_ISSUER) return null;
-
-  try {
-    // OIDC discovery
-    const discoveryUrl = `${OIDC_ISSUER}/.well-known/openid-configuration`;
-    const discovery = (await fetch(discoveryUrl).then((r) => r.json())) as { jwks_uri: string };
-    if (!discovery.jwks_uri) return null;
-
-    // Fetch JWKS
-    const jwks = (await fetch(discovery.jwks_uri).then((r) => r.json())) as typeof _oidcJwks;
-    _oidcJwks = jwks;
-    _oidcJwksExpiry = Date.now() + 3600_000; // Cache for 1 hour
-    return jwks;
-  } catch (err) {
-    console.error("[auth] OIDC JWKS fetch failed:", err);
-    return null;
-  }
+function getJwks(issuer: string) {
+  if (_jwks) return _jwks;
+  const jwksUrl = new URL(`${issuer}/.well-known/openid-configuration`);
+  _jwks = createRemoteJWKSet(jwksUrl);
+  return _jwks;
 }
 
-/**
- * Decode a JWT without verification (for extracting header/payload).
- * Full verification requires JWKS — this is a lightweight first pass.
- */
-function decodeJwt(token: string): { header: Record<string, unknown>; payload: Record<string, unknown> } | null {
-  const parts = token.split(".");
-  if (parts.length !== 3) return null;
-
-  try {
-    const header = JSON.parse(Buffer.from(parts[0]!, "base64url").toString("utf8"));
-    const payload = JSON.parse(Buffer.from(parts[1]!, "base64url").toString("utf8"));
-    return { header, payload };
-  } catch {
-    return null;
-  }
+interface OidcClaims extends JWTPayload {
+  sub: string;
+  email?: string;
+  name?: string;
+  preferred_username?: string;
+  org_id?: string;
+  organization?: string;
+  roles?: string[];
 }
 
 async function authenticateOidc(authHeader: string | null): Promise<AuthResponse> {
@@ -125,58 +103,28 @@ async function authenticateOidc(authHeader: string | null): Promise<AuthResponse
     return { ok: false, status: 401, error: "Bearer token required" };
   }
 
-  // Decode JWT to extract claims
-  const decoded = decodeJwt(token);
-  if (!decoded) {
-    return { ok: false, status: 401, error: "Invalid JWT format" };
+  try {
+    const jwks = getJwks(OIDC_ISSUER);
+    const verifyOptions: Record<string, unknown> = { issuer: OIDC_ISSUER };
+    if (OIDC_AUDIENCE) verifyOptions.audience = OIDC_AUDIENCE;
+
+    const { payload } = await jwtVerify<OidcClaims>(token, jwks, verifyOptions);
+
+    const user: AuthenticatedUser = {
+      id: payload.sub ?? "unknown",
+      email: payload.email,
+      name: payload.name ?? payload.preferred_username,
+      organizationId: payload.org_id ?? payload.organization,
+      roles: Array.isArray(payload.roles) ? payload.roles : undefined,
+    };
+
+    return { ok: true, user };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Token verification failed";
+    return { ok: false, status: 401, error: `OIDC verification failed: ${msg}` };
   }
-
-  const { payload } = decoded;
-
-  // Check expiry
-  if (typeof payload.exp === "number" && payload.exp * 1000 < Date.now()) {
-    return { ok: false, status: 401, error: "Token expired" };
-  }
-
-  // Check issuer
-  if (payload.iss !== OIDC_ISSUER) {
-    return { ok: false, status: 401, error: "Invalid issuer" };
-  }
-
-  // Check audience (if configured)
-  if (OIDC_AUDIENCE) {
-    const aud = payload.aud;
-    const audMatch = Array.isArray(aud) ? aud.includes(OIDC_AUDIENCE) : aud === OIDC_AUDIENCE;
-    if (!audMatch) {
-      return { ok: false, status: 401, error: "Invalid audience" };
-    }
-  }
-
-  // Verify signature against JWKS (if available)
-  const jwks = await fetchOidcJwks();
-  if (jwks) {
-    const kid = decoded.header.kid as string | undefined;
-    const key = kid ? jwks.keys.find((k) => k.kid === kid) : jwks.keys[0];
-    if (!key) {
-      return { ok: false, status: 401, error: "No matching signing key found" };
-    }
-    // Note: Full RSA/EC signature verification would require crypto.subtle or jose library.
-    // For production, install `jose` and verify: await jose.jwtVerify(token, JWKS)
-    // This is a structural placeholder — claims are validated but signature is not cryptographically verified.
-    console.warn("[auth] OIDC signature verification not fully implemented — install `jose` for production");
-  }
-
-  // Extract user identity from claims
-  const user: AuthenticatedUser = {
-    id: (payload.sub as string) ?? "unknown",
-    email: payload.email as string | undefined,
-    name: (payload.name as string) ?? (payload.preferred_username as string),
-    organizationId: (payload.org_id as string) ?? (payload.organization as string),
-    roles: Array.isArray(payload.roles) ? (payload.roles as string[]) : undefined,
-  };
-
-  return { ok: true, user };
 }
+
 
 // ── Public API ─────────────────────────────────────────────────────────
 
