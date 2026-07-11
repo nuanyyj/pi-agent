@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { sanitizeError } from "@/lib/api-errors";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { join, dirname } from "path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
@@ -37,6 +38,7 @@ export async function PUT(req: Request) {
     // Model registry refreshes on each /api/models request (no local cache to invalidate)
     return NextResponse.json({ success: true });
   } catch (error) {
-    return NextResponse.json({ error: String(error) }, { status: 500 });
+    return NextResponse.json({ error: sanitizeError(error) }, { status: 500 });
   }
 }
+

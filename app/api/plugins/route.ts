@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { sanitizeError } from "@/lib/api-errors";
 import { existsSync, readFileSync, statSync } from "fs";
 import { basename, dirname, extname, join, relative } from "path";
 import {
@@ -225,7 +226,7 @@ async function readPlugins(cwd: string): Promise<PluginsResponse> {
   } catch (error) {
     diagnostics.push({
       type: "error",
-      message: error instanceof Error ? error.message : String(error),
+      message: sanitizeError(error),
     });
   }
 
@@ -274,7 +275,7 @@ export async function GET(req: Request) {
   try {
     return NextResponse.json(await readPlugins(cwd));
   } catch (error) {
-    return NextResponse.json({ error: String(error) }, { status: 500 });
+    return NextResponse.json({ error: sanitizeError(error) }, { status: 500 });
   }
 }
 
@@ -321,6 +322,7 @@ export async function POST(req: Request) {
 
     return NextResponse.json(await readPlugins(body.cwd));
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 500 });
+    return NextResponse.json({ error: sanitizeError(error) }, { status: 500 });
   }
 }
+

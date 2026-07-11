@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "fs";
+import { readdir, readFile, stat, unlink, writeFile } from "fs/promises";
 import { join } from "path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import {
@@ -130,7 +130,7 @@ export async function GET(
 
     const header = sm.getHeader();
     let modified = header?.timestamp ?? new Date().toISOString();
-    try { modified = statSync(filePath).mtime.toISOString(); } catch { /* use header timestamp */ }
+    try { modified = (await stat(filePath)).mtime.toISOString(); } catch { /* use header timestamp */ }
     const allSessions = await listAllSessions();
     const parentSessionId = allSessions.find((s) => s.id === id)?.parentSessionId;
     const info = header ? {
@@ -213,7 +213,7 @@ export async function DELETE(
     }
 
     // Read header before deleting to get parentSession path
-    const firstLine = readFileSync(filePath, "utf8").split("\n")[0];
+    const firstLine = (await readFile(filePath, "utf8")).split("\n")[0];
     let parentSessionPath: string | undefined;
     try {
       const header = JSON.parse(firstLine) as { type?: string; parentSession?: string };
@@ -224,29 +224,31 @@ export async function DELETE(
     // Scan sibling files in the same directory
     const dir = filePath.replace(/\\/g, "/").split("/").slice(0, -1).join("/");
     try {
-      const files = readdirSync(dir).filter((f) => f.endsWith(".jsonl") && join(dir, f) !== filePath);
+      const allFiles = await readdir(dir); const files = allFiles.filter((f) => f.endsWith(".jsonl") && join(dir, f) !== filePath);
       for (const file of files) {
         const childPath = join(dir, file);
         try {
-          const content = readFileSync(childPath, "utf8");
+          const content = await readFile(childPath, "utf8");
           const lines = content.split("\n");
           const header = JSON.parse(lines[0]) as { type?: string; parentSession?: string };
           if (header.type === "session" && header.parentSession === filePath) {
             // Rewrite header with new parentSession
             header.parentSession = parentSessionPath;
             lines[0] = JSON.stringify(header);
-            writeFileSync(childPath, lines.join("\n"));
+            await writeFile(childPath, lines.join("\n"));
           }
         } catch { /* skip malformed */ }
       }
     } catch { /* skip if dir unreadable */ }
 
     getRpcSession(id)?.destroy();
-    unlinkSync(filePath);
+    await unlink(filePath);
     invalidateSessionPathCache(id);
     return NextResponse.json({ ok: true });
   } catch (error) {
     return NextResponse.json({ error: sanitizeError(error) }, { status: 500 });
   }
 }
+
+
 

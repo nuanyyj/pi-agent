@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { sanitizeError } from "@/lib/api-errors";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { resolveSessionPath, buildSessionContext } from "@/lib/session-reader";
 
@@ -21,6 +22,7 @@ export async function GET(
 
     return NextResponse.json({ context });
   } catch (error) {
-    return NextResponse.json({ error: String(error) }, { status: 500 });
+    return NextResponse.json({ error: sanitizeError(error) }, { status: 500 });
   }
 }
+

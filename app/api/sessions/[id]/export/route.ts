@@ -6,6 +6,7 @@ import { basename, dirname, join } from "path";
 import { promisify } from "util";
 import { fileURLToPath, pathToFileURL } from "url";
 import { NextResponse } from "next/server";
+import { sanitizeError } from "@/lib/api-errors";
 import { resolveSessionPath } from "@/lib/session-reader";
 
 const execFileAsync = promisify(execFile);
@@ -272,6 +273,7 @@ export async function GET(
       rmSync(outputPath, { force: true });
     }
   } catch (error) {
-    return NextResponse.json({ error: String(error) }, { status: 500 });
+    return NextResponse.json({ error: sanitizeError(error) }, { status: 500 });
   }
 }
+

@@ -4,6 +4,14 @@ import { SessionManager } from "@earendil-works/pi-coding-agent";
 
 export const dynamic = "force-dynamic";
 
+// Limit concurrent SSE connections per session to prevent exhaustion
+const MAX_SSE_CONNECTIONS = 10;
+declare global { var __piSseCount: Map<string, number> | undefined; }
+function getSseCount(): Map<string, number> {
+  if (!globalThis.__piSseCount) globalThis.__piSseCount = new Map();
+  return globalThis.__piSseCount;
+}
+
 // GET /api/agent/[id]/events - SSE stream of agent events
 export async function GET(
   req: Request,
@@ -12,6 +20,13 @@ export async function GET(
   const { id } = await params;
 
   // Fast path: already-running session
+  const counts = getSseCount();
+  const currentCount = counts.get(id) ?? 0;
+  if (currentCount >= MAX_SSE_CONNECTIONS) {
+    return new Response("Too many connections", { status: 429 });
+  }
+  counts.set(id, currentCount + 1);
+
   let session = getRpcSession(id);
   if (!session || !session.isAlive()) {
     const filePath = await resolveSessionPath(id);
@@ -22,7 +37,7 @@ export async function GET(
     try {
       ({ session } = await startRpcSession(id, filePath, cwd));
     } catch (error) {
-      return new Response(`Failed to start agent: ${error}`, { status: 500 });
+      return new Response("Failed to start agent", { status: 500 });
     }
   }
 
@@ -51,6 +66,8 @@ export async function GET(
 
       // Cleanup when client disconnects
       const cleanup = () => {
+    counts.set(id, (counts.get(id) ?? 1) - 1);
+    if ((counts.get(id) ?? 0) <= 0) counts.delete(id);
         clearInterval(heartbeat);
         unsubscribe();
         controller.close();
@@ -69,3 +86,5 @@ export async function GET(
     },
   });
 }
+
+

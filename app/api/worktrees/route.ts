@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { sanitizeError } from "@/lib/api-errors";
 import { existsSync } from "fs";
 import { addWorktree, listWorktrees, removeWorktree, resolveProject } from "@/lib/worktree";
 import { allowFileRoot, getAllowedFileRoots, isFilePathAllowed } from "@/lib/file-access";
@@ -44,7 +45,7 @@ export async function GET(req: Request) {
       worktrees,
     });
   } catch (error) {
-    return NextResponse.json({ error: String(error) }, { status: 500 });
+    return NextResponse.json({ error: sanitizeError(error) }, { status: 500 });
   }
 }
 
@@ -67,7 +68,7 @@ export async function POST(req: Request) {
     const result = await addWorktree(body.cwd, body.branch);
     return NextResponse.json(result);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = sanitizeError(error);
     return NextResponse.json({ error: message }, { status: 400 });
   }
 }
@@ -88,10 +89,11 @@ export async function DELETE(req: Request) {
     await removeWorktree(body.cwd, body.path, body.force === true);
     return NextResponse.json({ success: true });
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = sanitizeError(error);
     // git refuses to remove dirty worktrees without --force; surface that so
     // the UI can offer a force-remove confirmation.
     const dirty = /contains modified or untracked files|is dirty/i.test(message);
     return NextResponse.json({ error: message, dirty }, { status: dirty ? 409 : 400 });
   }
 }
+

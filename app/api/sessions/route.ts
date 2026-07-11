@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { sanitizeError } from "@/lib/api-errors";
 import { listAllSessions } from "@/lib/session-reader";
 import { getRunningRpcSessionIds } from "@/lib/rpc-manager";
 
@@ -8,8 +9,9 @@ export async function GET() {
     return NextResponse.json({ sessions, runningSessionIds: getRunningRpcSessionIds() });
   } catch (error) {
     return NextResponse.json(
-      { error: String(error) },
+      { error: sanitizeError(error) },
       { status: 500 }
     );
   }
 }
+

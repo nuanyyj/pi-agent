@@ -1,5 +1,6 @@
 import { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { NextResponse } from "next/server";
+import { sanitizeError } from "@/lib/api-errors";
 
 export const dynamic = "force-dynamic";
 
@@ -33,7 +34,7 @@ export async function POST(req: Request, { params }: Params) {
     authStorage.set(provider, { type: "api_key", key: cleanKey });
     return NextResponse.json({ success: true });
   } catch (error) {
-    return NextResponse.json({ error: String(error) }, { status: 500 });
+    return NextResponse.json({ error: sanitizeError(error) }, { status: 500 });
   }
 }
 
@@ -45,7 +46,8 @@ export async function DELETE(_req: Request, { params }: Params) {
     authStorage.remove(provider);
     return NextResponse.json({ success: true });
   } catch (error) {
-    return NextResponse.json({ error: String(error) }, { status: 500 });
+    return NextResponse.json({ error: sanitizeError(error) }, { status: 500 });
   }
 }
+
 

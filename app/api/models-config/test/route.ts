@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { sanitizeError } from "@/lib/api-errors";
 import { mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -14,7 +15,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  return sanitizeError(error);
 }
 
 function getAssistantText(message: AssistantMessage): string {
@@ -107,3 +108,4 @@ export async function POST(req: Request) {
     if (tempDir) rmSync(tempDir, { recursive: true, force: true });
   }
 }
+
