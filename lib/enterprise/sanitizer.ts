@@ -18,9 +18,9 @@ interface RedactionRule {
 }
 
 const RULES: RedactionRule[] = [
-  // Bearer tokens / generic auth headers
+  // Bearer tokens / generic auth headers — redact value after the key
   {
-    pattern: /((?:bearer|authorization|auth)[\s:=]+)[^\s,;)]+/gi,
+    pattern: /((?:bearer|authorization|auth)[\s:=]+\S*\s*)\S+/gi,
     replacement: "$1[REDACTED]",
   },
   // API key patterns (sk-, key-, api_key=, etc.)
@@ -55,8 +55,8 @@ const RULES: RedactionRule[] = [
   },
   // GitHub / GitLab tokens (ghp_, glpat-, gho_, ghs_, ghr_)
   {
-    pattern: /((?:ghp|glpat|gho|ghs|ghr)_[A-Za-z0-9]{20,})/g,
-    replacement: "$1[REDACTED]",
+    pattern: /(?:ghp|glpat|gho|ghs|ghr)_[A-Za-z0-9]{20,}/g,
+    replacement: "[REDACTED]",
   },
 ];
 

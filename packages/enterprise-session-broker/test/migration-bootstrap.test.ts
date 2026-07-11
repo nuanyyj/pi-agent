@@ -15,14 +15,24 @@ describe("createEnterpriseDatabase", () => {
            and table_name in (
              'enterprise_schema_migrations',
              'enterprise_sessions',
-             'enterprise_session_entries'
+             'enterprise_session_entries',
+             'enterprise_runs',
+             'enterprise_run_events',
+             'enterprise_audit_events',
+             'enterprise_quotas',
+             'enterprise_usage'
            )
          order by table_name`,
       );
       expect(rows.rows.map((row) => row.table_name)).toEqual([
+        "enterprise_audit_events",
+        "enterprise_quotas",
+        "enterprise_run_events",
+        "enterprise_runs",
         "enterprise_schema_migrations",
         "enterprise_session_entries",
         "enterprise_sessions",
+        "enterprise_usage",
       ]);
     } finally {
       await db.close();
