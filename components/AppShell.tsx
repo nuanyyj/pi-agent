@@ -19,6 +19,8 @@ import type { SessionInfo, SessionTreeNode } from "@/lib/types";
 import type { ChatInputHandle } from "./ChatInput";
 import type { SessionStatsInfo } from "@/lib/pi-types";
 import { EnterpriseBadge } from "./EnterpriseBadge";
+import { EnterpriseChatPanel } from "./EnterpriseChatPanel";
+import { useEnterprise } from "@/hooks/useEnterprise";
 
 type SessionCopyField = "file" | "id";
 
@@ -27,6 +29,8 @@ export function AppShell() {
   const searchParams = useSearchParams();
   const { isDark, toggleTheme } = useTheme();
   const isMobile = useIsMobile();
+  const enterprise = useEnterprise();
+  const [enterpriseMode, setEnterpriseMode] = useState(false);
   const [selectedSession, setSelectedSession] = useState<SessionInfo | null>(null);
   // When user clicks +, we only store the cwd — no fake session id
   const [newSessionCwd, setNewSessionCwd] = useState<string | null>(null);
@@ -504,6 +508,22 @@ export function AppShell() {
         {/* Top bar with sidebar toggle */}
           <div ref={topBarRef} style={{ display: "flex", alignItems: "center", flexShrink: 0, borderBottom: "1px solid var(--border)", height: 36, background: "var(--bg-panel)" }}>
             <EnterpriseBadge />
+            {enterprise.isEnabled && (
+              <button
+                onClick={() => setEnterpriseMode(!enterpriseMode)}
+                style={{
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  height: 36, padding: "0 10px", fontSize: 11,
+                  background: enterpriseMode ? "var(--accent)" : "none",
+                  color: enterpriseMode ? "#fff" : "var(--text-muted)",
+                  border: "none", borderRight: "1px solid var(--border)",
+                  cursor: "pointer", flexShrink: 0, fontWeight: 500,
+                }}
+                title="Toggle enterprise mode"
+              >
+                {enterpriseMode ? "Enterprise" : "Local"}
+              </button>
+            )}
           <button
             onClick={handleSidebarToggle}
             title={sidebarOpen ? "Hide sidebar" : "Show sidebar"}
@@ -953,7 +973,9 @@ export function AppShell() {
 
         {/* Chat content */}
         <div style={{ flex: 1, overflow: "hidden", position: "relative" }}>
-          {showChat ? (
+          {showChat && enterpriseMode ? (
+            <EnterpriseChatPanel />
+          ) : showChat ? (
             <ChatWindow
               key={sessionKey}
               session={selectedSession}
