@@ -173,6 +173,9 @@ export function createPgRunRepository(db: EnterpriseDatabase): RunRepository {
         [id, seq, event.type, JSON.stringify(event.data)],
       );
 
+      // Notify SSE listeners across instances via PG NOTIFY
+      await db.query("SELECT pg_notify('enterprise_run_events', $1 || ':' || $2)", [id, String(seq)]).catch(() => {});
+
       return { seq, type: event.type, timestamp: event.timestamp, data: event.data };
     },
 
