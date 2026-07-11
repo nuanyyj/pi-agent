@@ -1,6 +1,4 @@
-# Enterprise Phase 0A Development
-
-Phase 0A establishes the engineering foundation for the enterprise agent platform inside `pi-web-main`.
+# Enterprise Development
 
 ## Requirements
 
@@ -155,7 +153,58 @@ backed by the broker via `createBrokeredHarness()` in `src/brokered-runtime.ts`.
 This factory accepts a RunEnvelope and a database connection, opens or creates
 the conversation session in PostgreSQL, and returns the harness with the session.
 
+## Phase 1A: Worker Main Loop
+
+Phase 1A upgrades the enterprise worker from preflight-only validation to
+actual agent execution.
+
+### RunEnvelope (extended)
+
+The RunEnvelope now includes model configuration and user input:
+
+```json
+{
+  "protocolVersion": 1,
+  "runtimeProfile": "agent-harness-v1",
+  "organizationId": "org-1",
+  "conversationId": "conv-1",
+  "runId": "run-1",
+  "attempt": 1,
+  "workspaceRoot": "/workspace",
+  "toolNames": ["read", "bash", "edit", "write"],
+  "modelProvider": "openai",
+  "modelId": "gpt-4o",
+  "userInput": "Hello, world!",
+  "systemPrompt": "You are a helpful coding assistant."
+}
+```
+
+### Running the worker
+
+```powershell
+$env:PI_RUN_ENVELOPE_PATH = "path/to/envelope.json"
+$env:PI_POSTGRES_URL = "postgres://pi_enterprise:replace-for-local-development@127.0.0.1:5432/pi_enterprise"
+$env:OPENAI_API_KEY = "sk-..."
+npx tsx packages/enterprise-worker/src/main.ts
+```
+
+### Key modules
+
+- `src/run-executor.ts` — Core execution: envelope → PG → brokered harness → model → prompt → events
+- `src/main.ts` — CLI entry point (reads envelope file, connects PG, runs executor)
+- `src/brokered-runtime.ts` — Creates AgentHarness backed by PG session broker
+- `src/coding-tools.ts` — Approved coding tool allowlist for Stage A
+
+### Event collection
+
+Harness events are collected during execution and sanitized (API keys, tokens,
+and headers stripped). Events are returned as part of the RunResult.
+
+Future phases will persist events to PostgreSQL as `run_events` for real-time
+SSE streaming to the frontend.
+
 ### Design documents
 
-- Spec: `docs/superpowers/specs/2026-07-11-enterprise-phase-0b-versioned-session-broker-design.md`
-- Plan: `docs/superpowers/plans/2026-07-11-enterprise-phase-0b-versioned-session-broker.md`
+- Platform design: `docs/superpowers/specs/2026-07-10-enterprise-agent-platform-design.md`
+- Phase 0B spec: `docs/superpowers/specs/2026-07-11-enterprise-phase-0b-versioned-session-broker-design.md`
+- Phase 0B plan: `docs/superpowers/plans/2026-07-11-enterprise-phase-0b-versioned-session-broker.md`
