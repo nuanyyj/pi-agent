@@ -1,42 +1,54 @@
 import { NextResponse } from "next/server";
-import { existsSync } from "fs";
+import { existsSync, statSync } from "fs";
+import { isAbsolute, resolve, normalize } from "path";
 import { allowFileRoot } from "@/lib/file-access";
 import { startRpcSession } from "@/lib/rpc-manager";
+import { sanitizeError } from "@/lib/api-errors";
 
-// POST /api/agent/new  body: { cwd: string; type: string; message?: string; ... }
-// Spawns a brand-new pi session. Most calls immediately send the first command;
-// type:"ensure_session" only creates the runtime so clients can query commands.
-// Returns { sessionId, data } where sessionId is pi's real session id.
+const MAX_CWD_LENGTH = 4096;
+const BLOCKED_PATHS = new Set(["/", "/etc", "/var", "/usr", "/bin", "/sbin", "/boot", "/dev", "/proc", "/sys"]);
+
+function validateCwd(cwd: string): string | null {
+  if (!cwd || typeof cwd !== "string") return "cwd is required";
+  if (cwd.length > MAX_CWD_LENGTH) return "cwd too long";
+  const normalized = isAbsolute(cwd) ? normalize(cwd) : resolve(cwd);
+  if (!existsSync(normalized)) return "Directory does not exist";
+  try {
+    if (!statSync(normalized).isDirectory()) return "Path is not a directory";
+  } catch {
+    return "Cannot stat directory";
+  }
+  if (BLOCKED_PATHS.has(normalized)) return "Access to system directories is denied";
+  return null;
+}
+
 export async function POST(req: Request) {
   try {
     const body = await req.json() as { cwd?: string; [key: string]: unknown };
-    const { cwd, ...command } = body;
+    const { cwd: rawCwd, ...command } = body;
 
-    if (!cwd || typeof cwd !== "string") {
+    if (!rawCwd || typeof rawCwd !== "string") {
       return NextResponse.json({ error: "cwd is required" }, { status: 400 });
     }
-    if (!existsSync(cwd)) {
-      return NextResponse.json({ error: `Directory does not exist: ${cwd}` }, { status: 400 });
+
+    const cwd = isAbsolute(rawCwd) ? normalize(rawCwd) : resolve(rawCwd);
+    const cwdError = validateCwd(rawCwd);
+    if (cwdError) {
+      return NextResponse.json({ error: cwdError }, { status: 400 });
     }
 
-    // Use a one-time key so startRpcSession's lock doesn't conflict with real session ids
-    const { provider, modelId, toolNames, thinkingLevel, ...promptCommand } = command as { provider?: string; modelId?: string; toolNames?: string[]; thinkingLevel?: string; [key: string]: unknown };
+    const { provider, modelId, toolNames, thinkingLevel, ...promptCommand } = command as {
+      provider?: string; modelId?: string; toolNames?: string[]; thinkingLevel?: string; [key: string]: unknown;
+    };
 
     const tempKey = `__new__${Date.now()}`;
     const { session, realSessionId } = await startRpcSession(tempKey, "", cwd, toolNames);
-
-    // Keep the files-route allowed-roots cache (see app/api/files/[...path]/route.ts)
-    // in sync so the new cwd is immediately readable via /api/files. Without this,
-    // a file request under a brand-new cwd would 403 for up to the cache TTL.
     allowFileRoot(cwd);
 
-    // Apply pre-selected model before sending the prompt
-    if (provider && modelId) {
+    if (provider && typeof provider === "string" && modelId && typeof modelId === "string") {
       await session.send({ type: "set_model", provider, modelId });
     }
-
-    // Apply pre-selected thinking level before sending the prompt
-    if (thinkingLevel) {
+    if (thinkingLevel && typeof thinkingLevel === "string") {
       await session.send({ type: "set_thinking_level", level: thinkingLevel });
     }
 
@@ -45,9 +57,8 @@ export async function POST(req: Request) {
     }
 
     const result = await session.send(promptCommand);
-
     return NextResponse.json({ success: true, sessionId: realSessionId, data: result });
   } catch (error) {
-    return NextResponse.json({ error: String(error) }, { status: 500 });
+    return NextResponse.json({ error: sanitizeError(error) }, { status: 500 });
   }
 }

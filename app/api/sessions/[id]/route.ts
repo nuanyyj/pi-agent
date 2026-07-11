@@ -9,6 +9,7 @@ import {
   listAllSessions,
 } from "@/lib/session-reader";
 import { getRpcSession } from "@/lib/rpc-manager";
+import { sanitizeError } from "@/lib/api-errors";
 
 // BranchNavigator still traverses recursively, so keep the response tree shallow.
 const MAX_PROJECTED_TREE_DEPTH = 200;
@@ -172,7 +173,7 @@ export async function GET(
       ...(agentState !== undefined ? { agentState } : {}),
     });
   } catch (error) {
-    return NextResponse.json({ error: String(error) }, { status: 500 });
+    return NextResponse.json({ error: sanitizeError(error) }, { status: 500 });
   }
 }
 
@@ -195,7 +196,7 @@ export async function PATCH(
     sm.appendSessionInfo(name.trim());
     return NextResponse.json({ ok: true });
   } catch (error) {
-    return NextResponse.json({ error: String(error) }, { status: 500 });
+    return NextResponse.json({ error: sanitizeError(error) }, { status: 500 });
   }
 }
 
@@ -245,6 +246,7 @@ export async function DELETE(
     invalidateSessionPathCache(id);
     return NextResponse.json({ ok: true });
   } catch (error) {
-    return NextResponse.json({ error: String(error) }, { status: 500 });
+    return NextResponse.json({ error: sanitizeError(error) }, { status: 500 });
   }
 }
+

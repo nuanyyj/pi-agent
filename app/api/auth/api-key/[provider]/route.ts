@@ -25,7 +25,12 @@ export async function POST(req: Request, { params }: Params) {
       return NextResponse.json({ error: "apiKey is required" }, { status: 400 });
     }
     const authStorage = AuthStorage.create();
-    authStorage.set(provider, { type: "api_key", key: apiKey.trim() });
+    // Validate key format: must look like a real API key (no control chars, reasonable length)
+    const cleanKey = apiKey.trim();
+    if (cleanKey.length < 8 || cleanKey.length > 4096 || /[\x00-\x1f\x7f]/.test(cleanKey)) {
+      return NextResponse.json({ error: "Invalid API key format" }, { status: 400 });
+    }
+    authStorage.set(provider, { type: "api_key", key: cleanKey });
     return NextResponse.json({ success: true });
   } catch (error) {
     return NextResponse.json({ error: String(error) }, { status: 500 });
@@ -43,3 +48,4 @@ export async function DELETE(_req: Request, { params }: Params) {
     return NextResponse.json({ error: String(error) }, { status: 500 });
   }
 }
+

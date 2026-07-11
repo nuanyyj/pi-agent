@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { sanitizeError } from "@/lib/api-errors";
 import { runNpx } from "@/lib/npx";
 
 export const dynamic = "force-dynamic";
@@ -10,6 +11,11 @@ export async function POST(req: Request) {
   try {
     const { package: pkg, scope, cwd } = await req.json() as { package?: string; scope?: string; cwd?: string };
     if (!pkg?.trim()) return NextResponse.json({ error: "package required" }, { status: 400 });
+    // Validate package name to prevent injection
+    const pkgName = pkg.trim();
+    if (!/^[@a-zA-Z0-9][a-zA-Z0-9._\-\/]*$/.test(pkgName) || pkgName.includes("..") || pkgName.startsWith("-")) {
+      return NextResponse.json({ error: "Invalid package name" }, { status: 400 });
+    }
 
     const isGlobal = scope !== "project";
     const args = ["skills", "add", pkg.trim(), "-y", "--agent", "pi"];
@@ -29,8 +35,7 @@ export async function POST(req: Request) {
     }
     return NextResponse.json({ success: true, output });
   } catch (e: unknown) {
-    const err = e as { stdout?: string; stderr?: string; message?: string };
-    const output = ((err.stdout ?? "") + (err.stderr ?? "")).replace(ANSI_RE, "");
-    return NextResponse.json({ error: output || (err.message ?? String(e)) }, { status: 500 });
+    return NextResponse.json({ error: sanitizeError(e) }, { status: 500 });
   }
 }
+
