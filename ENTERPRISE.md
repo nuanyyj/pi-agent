@@ -62,6 +62,13 @@ docker compose -f compose.enterprise.prod.yml ps
 | `PI_MINIO_API_PORT` | MinIO API port (compose) | `19000` |
 | `PI_MINIO_CONSOLE_PORT` | MinIO console port (compose) | `19001` |
 
+### Worker Sandbox
+
+| Variable | Description | Default |
+|----------|-------------|----------|
+| PI_WORKER_MODE | local or docker | local |
+| PI_WORKER_DOCKER_IMAGE | Docker image for sandboxed workers | pi-enterprise-worker |
+
 ### LLM Provider Keys
 
 | Variable | Description |
