@@ -39,7 +39,7 @@
     "test:enterprise-imports": "node scripts/check-enterprise-imports.mjs",
     "check:runtime-versions": "node scripts/check-enterprise-runtime-versions.mjs",
     "check:enterprise": "npm run check:runtime-versions && npm run typecheck && npm run lint && npm run test:unit && npm run test:enterprise-imports",
-    "build:enterprise-packages": "npm run build --workspace @pi-web/enterprise-protocol && npm run build --workspace @pi-web/enterprise-worker",
+    "build:enterprise-packages": "npm run build --workspace @pi-web/enterprise-protocol && npm run build --workspace @pi-web/enterprise-session-broker && npm run build --workspace @pi-web/enterprise-worker",
     "release": "npm version patch --no-git-tag-version && npm run build && npm publish --access public"
   },
   "dependencies": {

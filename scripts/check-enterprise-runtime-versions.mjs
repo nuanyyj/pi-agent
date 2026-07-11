@@ -36,6 +36,7 @@ function readJson(path) {
 export function main(rootDir) {
   const errors = validateRuntimeVersions({
     web: readJson(resolve(rootDir, "package.json")),
+    sessionBroker: readJson(resolve(rootDir, "packages/enterprise-session-broker/package.json")),
     worker: readJson(resolve(rootDir, "packages/enterprise-worker/package.json")),
   });
   if (errors.length > 0) {
