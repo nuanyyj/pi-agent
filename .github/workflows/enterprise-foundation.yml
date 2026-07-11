@@ -1,0 +1,32 @@
+name: enterprise-foundation
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.19.0
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: cp .env.enterprise.example .env.enterprise
+      - run: docker compose --env-file .env.enterprise -f compose.enterprise.yml up -d
+      - run: npm run check:runtime-versions
+      - run: npm run build:enterprise-packages
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run test:unit
+      - run: node --test test/enterprise/*.test.mjs
+      - run: npm run test:enterprise-imports
+      - run: docker build -f packages/enterprise-worker/Dockerfile -t pi-enterprise-worker:phase0a .
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+      - if: always()
+        run: docker compose --env-file .env.enterprise -f compose.enterprise.yml down
