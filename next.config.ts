@@ -12,7 +12,10 @@ try {
 const nextConfig: NextConfig = {
   serverExternalPackages: ["@earendil-works/pi-coding-agent", "@earendil-works/pi-ai"],
   transpilePackages: ["@pi-web/enterprise-protocol"],
-  allowedDevOrigins: ['192.168.*.*'],
+  allowedDevOrigins: ["127.0.0.1", "192.168.*.*"],
+  turbopack: {
+    root: __dirname,
+  },
   async headers() {
     return [
       {
