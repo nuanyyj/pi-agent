@@ -47,10 +47,16 @@ export async function GET(
 
   const stream = new ReadableStream({
     start(controller) {
-      const encode = (data: unknown) => {
-        const text = `data: ${JSON.stringify(data)}\n\n`;
-        controller.enqueue(new TextEncoder().encode(text));
+      const encoder = new TextEncoder();
+      const send = (text: string) => {
+        try { controller.enqueue(encoder.encode(text)); } catch { /* closed */ }
       };
+      const encode = (data: unknown) => {
+        send(`data: ${JSON.stringify(data)}\n\n`);
+      };
+
+      // Tell client to reconnect after 3 seconds if disconnected
+      send("retry: 3000\n\n");
 
       // Send initial connected event
       encode({ type: "connected", sessionId: id });
@@ -61,11 +67,7 @@ export async function GET(
 
       // Heartbeat every 30s to prevent server/proxy timeout (Next.js default ~120-150s)
       const heartbeat = setInterval(() => {
-        try {
-          controller.enqueue(new TextEncoder().encode(":\n\n"));
-        } catch {
-          // controller already closed
-        }
+        send(":\n\n");
       }, 30_000);
 
       // Cleanup when client disconnects
@@ -90,5 +92,3 @@ export async function GET(
     },
   });
 }
-
-

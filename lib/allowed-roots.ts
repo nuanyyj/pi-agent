@@ -5,6 +5,8 @@ declare global {
   var __piAdditionalAllowedRoots: Set<string> | undefined;
 }
 
+const MAX_ALLOWED_ROOTS = 1000;
+
 export function normalizeSlashes(filePath: string): string {
   return filePath.replace(/\\/g, "/");
 }
@@ -18,7 +20,19 @@ export function getAdditionalAllowedRoots(): Set<string> {
 
 export function allowFileRoot(root: string): void {
   if (!root) return;
+  const roots = getAdditionalAllowedRoots();
+  if (roots.size >= MAX_ALLOWED_ROOTS) {
+    // Evict oldest entries (Set iteration order = insertion order)
+    const evictCount = Math.ceil(MAX_ALLOWED_ROOTS * 0.1);
+    let evicted = 0;
+    for (const key of roots) {
+      if (evicted >= evictCount) break;
+      roots.delete(key);
+      globalThis.__piAllowedRootsCache?.roots.delete(key);
+      evicted++;
+    }
+  }
   const normalizedRoot = normalizeSlashes(root);
-  getAdditionalAllowedRoots().add(normalizedRoot);
+  roots.add(normalizedRoot);
   globalThis.__piAllowedRootsCache?.roots.add(normalizedRoot);
 }

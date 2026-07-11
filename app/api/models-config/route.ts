@@ -34,6 +34,19 @@ export async function GET() {
 export async function PUT(req: Request) {
   try {
     const body = await req.json() as Record<string, unknown>;
+    // Validate structure — must have a 'providers' object
+    if (!body || typeof body !== "object" || !("providers" in body)) {
+      return NextResponse.json(
+        { error: "Request body must contain a 'providers' field" },
+        { status: 400 }
+      );
+    }
+    if (typeof body.providers !== "object" || body.providers === null || Array.isArray(body.providers)) {
+      return NextResponse.json(
+        { error: "'providers' must be a non-null object" },
+        { status: 400 }
+      );
+    }
     writeModelsJson(body);
     // Model registry refreshes on each /api/models request (no local cache to invalidate)
     return NextResponse.json({ success: true });
@@ -41,4 +54,3 @@ export async function PUT(req: Request) {
     return NextResponse.json({ error: sanitizeError(error) }, { status: 500 });
   }
 }
-
