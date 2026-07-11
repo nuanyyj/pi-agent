@@ -48,7 +48,7 @@ export interface MoveLeafInput {
 }
 export interface SessionBroker {
     createSession(options: CreateEnterpriseSessionOptions): Promise<BrokerSessionSnapshot>;
-    openSessionById(sessionId: string): Promise<BrokerSessionSnapshot>;
+    openSessionById(sessionId: string, organizationId: string): Promise<BrokerSessionSnapshot>;
     openSession(metadata: EnterpriseSessionMetadata): Promise<BrokerSessionSnapshot>;
     listSessions(options: ListEnterpriseSessionOptions): Promise<EnterpriseSessionMetadata[]>;
     getEntry(sessionId: string, entryId: string): Promise<SessionTreeEntry | undefined>;

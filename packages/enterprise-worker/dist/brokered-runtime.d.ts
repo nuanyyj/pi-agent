@@ -10,4 +10,11 @@ export interface BrokeredHarnessResult {
     session: Session<EnterpriseSessionMetadata>;
     metadata: EnterpriseSessionMetadata;
 }
+/**
+ * Create an AgentHarness backed by a PostgreSQL-brokered session.
+ *
+ * Opens an existing enterprise session for the conversation or creates a new
+ * one. Handles concurrent creation gracefully by retrying open after a
+ * failed create (duplicate key from a racing worker).
+ */
 export declare function createBrokeredHarness(options: CreateBrokeredHarnessOptions): Promise<BrokeredHarnessResult>;

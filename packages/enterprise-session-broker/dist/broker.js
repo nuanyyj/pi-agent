@@ -49,6 +49,14 @@ async function loadSessionRowByMetadata(tx, metadata) {
     }
     return row;
 }
+async function requireActiveSession(tx, sessionId) {
+    const result = await tx.query(`select deleted_at from enterprise_sessions where id = $1`, [sessionId]);
+    const row = result.rows[0];
+    if (!row)
+        throw new SessionError("not_found", `Session not found: ${sessionId}`);
+    if (row.deleted_at)
+        throw new SessionError("invalid_session", `Session deleted: ${sessionId}`);
+}
 async function loadEntries(tx, sessionId) {
     const result = await tx.query(`select entry
      from enterprise_session_entries
@@ -143,9 +151,12 @@ export function createSessionBroker(db) {
                 entries: [],
             };
         },
-        async openSessionById(sessionId) {
+        async openSessionById(sessionId, organizationId) {
             return db.transaction(async (tx) => {
                 const row = await loadSessionRow(tx, sessionId);
+                if (row.organization_id !== organizationId) {
+                    throw new SessionError("invalid_session", `Session ${sessionId} does not belong to organization ${organizationId}`);
+                }
                 return toSnapshot(row, await loadEntries(tx, row.id));
             });
         },
@@ -170,16 +181,28 @@ export function createSessionBroker(db) {
             });
         },
         async getEntry(sessionId, entryId) {
-            return db.transaction((tx) => loadEntry(tx, sessionId, entryId));
+            return db.transaction(async (tx) => {
+                await requireActiveSession(tx, sessionId);
+                return loadEntry(tx, sessionId, entryId);
+            });
         },
         async getEntries(sessionId) {
-            return db.transaction((tx) => loadEntries(tx, sessionId));
+            return db.transaction(async (tx) => {
+                await requireActiveSession(tx, sessionId);
+                return loadEntries(tx, sessionId);
+            });
         },
         async getPathToRoot(sessionId, leafId) {
-            return db.transaction((tx) => loadPathToRoot(tx, sessionId, leafId));
+            return db.transaction(async (tx) => {
+                await requireActiveSession(tx, sessionId);
+                return loadPathToRoot(tx, sessionId, leafId);
+            });
         },
         async getLabel(sessionId, entryId) {
-            return db.transaction((tx) => loadLabel(tx, sessionId, entryId));
+            return db.transaction(async (tx) => {
+                await requireActiveSession(tx, sessionId);
+                return loadLabel(tx, sessionId, entryId);
+            });
         },
         async appendAndAdvance(input) {
             return db.transaction(async (tx) => {

@@ -327,7 +327,7 @@ describe("Session through broker (full integration)", () => {
     });
 
     const broker2 = createSessionBroker(db);
-    const reopened = await broker2.openSessionById(snapshot.metadata.id);
+    const reopened = await broker2.openSessionById(snapshot.metadata.id, orgId);
     expect(reopened.version).toBe(1);
     expect(reopened.activeLeafId).toBe("rst-1");
 

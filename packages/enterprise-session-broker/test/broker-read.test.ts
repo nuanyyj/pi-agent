@@ -59,7 +59,7 @@ describe("session broker reads", () => {
     expect(created.activeLeafId).toBeNull();
     expect(created.entries).toEqual([]);
 
-    const opened = await broker.openSessionById(created.metadata.id);
+    const opened = await broker.openSessionById(created.metadata.id, orgId);
     expect(opened.metadata.id).toBe(created.metadata.id);
     expect(opened.metadata.organizationId).toBe(orgId);
   });
@@ -243,7 +243,7 @@ describe("session broker reads", () => {
     });
     await broker.deleteSession(created.metadata.id, orgId);
     await expect(
-      broker.openSessionById(created.metadata.id),
+      broker.openSessionById(created.metadata.id, orgId),
     ).rejects.toThrow(/deleted/i);
   });
 });

@@ -93,6 +93,16 @@ async function loadSessionRowByMetadata(
   return row;
 }
 
+async function requireActiveSession(tx: EnterpriseTransaction, sessionId: string): Promise<void> {
+  const result = await tx.query<{ deleted_at: string | null }>(
+    `select deleted_at from enterprise_sessions where id = $1`,
+    [sessionId],
+  );
+  const row = result.rows[0];
+  if (!row) throw new SessionError("not_found", `Session not found: ${sessionId}`);
+  if (row.deleted_at) throw new SessionError("invalid_session", `Session deleted: ${sessionId}`);
+}
+
 async function loadEntries(tx: EnterpriseTransaction, sessionId: string): Promise<SessionTreeEntry[]> {
   const result = await tx.query<EntryRow>(
     `select entry
@@ -221,9 +231,15 @@ export function createSessionBroker(db: EnterpriseDatabase): SessionBroker {
         entries: [],
       };
     },
-    async openSessionById(sessionId: string): Promise<BrokerSessionSnapshot> {
+    async openSessionById(sessionId: string, organizationId: string): Promise<BrokerSessionSnapshot> {
       return db.transaction(async (tx) => {
         const row = await loadSessionRow(tx, sessionId);
+        if (row.organization_id !== organizationId) {
+          throw new SessionError(
+            "invalid_session",
+            `Session ${sessionId} does not belong to organization ${organizationId}`,
+          );
+        }
         return toSnapshot(row, await loadEntries(tx, row.id));
       });
     },
@@ -248,16 +264,28 @@ export function createSessionBroker(db: EnterpriseDatabase): SessionBroker {
       });
     },
     async getEntry(sessionId: string, entryId: string): Promise<SessionTreeEntry | undefined> {
-      return db.transaction((tx) => loadEntry(tx, sessionId, entryId));
+      return db.transaction(async (tx) => {
+        await requireActiveSession(tx, sessionId);
+        return loadEntry(tx, sessionId, entryId);
+      });
     },
     async getEntries(sessionId: string): Promise<SessionTreeEntry[]> {
-      return db.transaction((tx) => loadEntries(tx, sessionId));
+      return db.transaction(async (tx) => {
+        await requireActiveSession(tx, sessionId);
+        return loadEntries(tx, sessionId);
+      });
     },
     async getPathToRoot(sessionId: string, leafId: string | null): Promise<SessionTreeEntry[]> {
-      return db.transaction((tx) => loadPathToRoot(tx, sessionId, leafId));
+      return db.transaction(async (tx) => {
+        await requireActiveSession(tx, sessionId);
+        return loadPathToRoot(tx, sessionId, leafId);
+      });
     },
     async getLabel(sessionId: string, entryId: string): Promise<string | undefined> {
-      return db.transaction((tx) => loadLabel(tx, sessionId, entryId));
+      return db.transaction(async (tx) => {
+        await requireActiveSession(tx, sessionId);
+        return loadLabel(tx, sessionId, entryId);
+      });
     },
     async appendAndAdvance(input: AppendAndAdvanceInput): Promise<BrokerResult<{ version: number; entryId: string }>> {
       return db.transaction(async (tx) => {
