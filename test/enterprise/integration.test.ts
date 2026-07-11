@@ -10,7 +10,8 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createEnterpriseDatabase, type EnterpriseDatabase } from "../../packages/enterprise-session-broker/src/db";
-import { createSessionBroker, type SessionBroker } from "../../packages/enterprise-session-broker/src/broker";
+import { createSessionBroker } from "../../packages/enterprise-session-broker/src/broker";
+import type { SessionBroker } from "../../packages/enterprise-session-broker/src/types";
 import { createPgRunRepository, type RunRepository, type RunRecord } from "../../lib/enterprise/run-repo";
 import { checkQuota, recordUsage, getUsageSummary } from "../../lib/enterprise/quota";
 import { writeAuditEvent, queryAuditEvents } from "../../lib/enterprise/audit-log";

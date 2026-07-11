@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useEnterprise } from "@/hooks/useEnterprise";
 
-type AdminTab = "users" | "quotas";
+type AdminTab = "users" | "agents" | "quotas";
 
 interface EnterpriseUser {
   id: string;
@@ -47,7 +47,7 @@ export function EnterpriseAdmin({ organizationId }: { organizationId: string }) 
           <circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
         </svg>
         <span style={{ fontSize: 14, fontWeight: 600, marginRight: 16 }}>Admin</span>
-        {(["users", "quotas"] as AdminTab[]).map((t) => (
+        {(["users", "agents", "quotas"] as AdminTab[]).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -58,14 +58,14 @@ export function EnterpriseAdmin({ organizationId }: { organizationId: string }) 
               transition: "color 0.12s, border-color 0.12s",
             }}
           >
-            {t === "users" ? "Users" : "Quotas & Usage"}
+            {t === "users" ? "Users" : t === "agents" ? "Agents" : "Quotas & Usage"}
           </button>
         ))}
       </div>
 
       {/* Tab content */}
       <div style={{ flex: 1, overflowY: "auto" }}>
-        {tab === "users" ? <UsersTab organizationId={organizationId} /> : <QuotasTab organizationId={organizationId} />}
+        {tab === "users" ? <UsersTab organizationId={organizationId} /> : tab === "agents" ? <AgentsTab organizationId={organizationId} /> : <QuotasTab organizationId={organizationId} />}
       </div>
     </div>
   );
@@ -451,3 +451,4 @@ function roleColor(role: string): { bg: string; fg: string } {
 function formatTime(iso: string): string {
   try { return new Date(iso).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }); } catch { return ""; }
 }
+import { AgentsTab } from "./AgentsTab";

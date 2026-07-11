@@ -16,9 +16,12 @@ export type AuditAction =
   | "run.created"
   | "run.cancelled"
   | "run.completed"
-  | "run.failed";
+  | "run.failed"
+  | "agent.created"
+  | "agent.updated"
+  | "agent.deactivated";
 
-export type AuditResourceType = "conversation" | "run";
+export type AuditResourceType = "conversation" | "run" | "agent";
 
 export interface AuditEvent {
   id: number;

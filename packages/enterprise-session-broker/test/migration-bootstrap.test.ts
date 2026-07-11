@@ -20,11 +20,13 @@ describe("createEnterpriseDatabase", () => {
              'enterprise_run_events',
              'enterprise_audit_events',
              'enterprise_quotas',
+             'enterprise_agents',
              'enterprise_usage'
            )
          order by table_name`,
       );
       expect(rows.rows.map((row) => row.table_name)).toEqual([
+        "enterprise_agents",
         "enterprise_audit_events",
         "enterprise_quotas",
         "enterprise_run_events",

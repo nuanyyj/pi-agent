@@ -201,4 +201,26 @@ async function ensureSchema(client: Client): Promise<void> {
     create index if not exists enterprise_usage_org_idx
       on enterprise_usage(organization_id, recorded_at desc)
   `);
+
+  // Agent registry
+  await client.query(`
+    create table if not exists enterprise_agents (
+      id text not null,
+      organization_id text not null,
+      name text not null,
+      description text not null default '',
+      system_prompt text not null default '',
+      default_model_provider text not null default 'openai',
+      default_model_id text not null default 'gpt-4o',
+      default_tools jsonb not null default '[]'::jsonb,
+      is_active boolean not null default true,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now(),
+      primary key (id, organization_id)
+    )
+  `);
+  await client.query(`
+    create index if not exists enterprise_agents_org_idx
+      on enterprise_agents(organization_id, is_active)
+  `);
 }
