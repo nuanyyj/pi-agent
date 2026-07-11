@@ -4,6 +4,7 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { useEnterprise, type EnterpriseConversation, type EnterpriseRun, type EnterpriseRunEvent } from "@/hooks/useEnterprise";
 import { MessageView } from "./MessageView";
 import { ArtifactList } from "./ArtifactList";
+import { RunHistory } from "./RunHistory";
 import { mapEventsToMessages, createUserMessage } from "@/lib/enterprise/event-mapper";
 import type { AgentMessage } from "@/lib/types";
 
@@ -17,6 +18,7 @@ export function EnterpriseChatPanel({ conversation }: { conversation: Enterprise
     createRun,
     cancelRun,
     subscribeRunEvents,
+    getRunHistory,
   } = useEnterprise();
 
   const conversationRef = useRef(conversation);
@@ -122,11 +124,22 @@ export function EnterpriseChatPanel({ conversation }: { conversation: Enterprise
       console.error("[enterprise] cancel failed:", err);
     }
   }, [activeRun, cancelRun]);
+const handleLoadRunHistory = useCallback(async (runId: string) => {
+    try {
+      const history = await getRunHistory(runId);
+      setActiveRun(history.run as EnterpriseRun);
+      setRunEvents(history.events);
+    } catch (err) {
+      console.error("[enterprise] load run history failed:", err);
+    }
+  }, [getRunHistory]);
 
   if (!isEnabled) return null;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "var(--bg)" }}>
+      <RunHistory conversationId={conversation.id} activeRunId={activeRun?.id ?? null} onSelectRun={setActiveRun} onLoadRunEvents={handleLoadRunHistory} />
+
       {/* Conversation header */}
       <div style={{
         display: "flex", alignItems: "center", gap: 8,

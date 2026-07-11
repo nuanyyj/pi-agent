@@ -60,6 +60,7 @@ interface EnterpriseContextValue {
   cancelRun: (id: string) => Promise<void>;
   deleteConversation: (id: string) => Promise<void>;
   listRuns: (conversationId?: string) => Promise<EnterpriseRun[]>;
+  getRunHistory: (runId: string) => Promise<{ run: EnterpriseRun; events: EnterpriseRunEvent[] }>;
 
   // SSE event streaming
   subscribeRunEvents: (
@@ -180,6 +181,15 @@ export function EnterpriseProvider({ children }: { children: ReactNode }) {
     [organizationId],
   );
 
+  const getRunHistory = useCallback(
+    async (runId: string): Promise<{ run: EnterpriseRun; events: EnterpriseRunEvent[] }> => {
+      const res = await fetch(`/api/enterprise/v1/runs/${encodeURIComponent(runId)}/history`);
+      if (!res.ok) throw new Error("Failed to load run history");
+      return (await res.json()) as { run: EnterpriseRun; events: EnterpriseRunEvent[] };
+    },
+    [],
+  );
+
   // ── SSE event streaming ──────────────────────────────────────────
 
   const subscribeRunEvents = useCallback(
@@ -248,6 +258,7 @@ export function EnterpriseProvider({ children }: { children: ReactNode }) {
     deleteConversation,
     listRuns,
     subscribeRunEvents,
+    getRunHistory,
   };
 
   return <EnterpriseContext.Provider value={value}>{children}</EnterpriseContext.Provider>;
