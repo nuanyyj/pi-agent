@@ -32,7 +32,7 @@
     "build": "next build --webpack",
     "start": "next start -p 30141",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit && npm run typecheck --workspaces --if-present",
+    "typecheck": "npm run build --workspace @pi-web/enterprise-protocol && tsc --noEmit && npm run typecheck --workspaces --if-present",
     "test:unit": "vitest run",
     "test:enterprise-imports": "node scripts/check-enterprise-imports.mjs",
     "check:runtime-versions": "node scripts/check-enterprise-runtime-versions.mjs",
