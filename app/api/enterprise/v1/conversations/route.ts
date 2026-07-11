@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { sanitizeError } from "@/lib/api-errors";
 import { getEnterpriseDb, isEnterpriseEnabled } from "@/lib/enterprise/db";
 import { createSessionBroker, PostgresSessionRepo } from "@pi-web/enterprise-session-broker";
+import { checkRateLimit, getClientKey } from "@/lib/enterprise/rate-limit";
 import { randomUUID } from "node:crypto";
 
 /**
@@ -9,6 +10,11 @@ import { randomUUID } from "node:crypto";
  * Create a new enterprise conversation (session in PostgreSQL).
  */
 export async function POST(req: Request) {
+  // Rate limit: max 30 conversation creations per minute per client
+  if (!checkRateLimit(`conversations:${getClientKey(req)}`, 30, 60_000)) {
+    return NextResponse.json({ error: "Too many requests" }, { status: 429 });
+  }
+
   if (!isEnterpriseEnabled()) {
     return NextResponse.json({ error: "Enterprise mode not enabled" }, { status: 503 });
   }

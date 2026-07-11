@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { sanitizeError } from "@/lib/api-errors";
 import { isEnterpriseEnabled } from "@/lib/enterprise/db";
 import { getRunRepository, type RunRecord } from "@/lib/enterprise/run-repo";
+import { checkRateLimit, getClientKey } from "@/lib/enterprise/rate-limit";
 import { randomUUID } from "node:crypto";
 import { writeFile, mkdtemp } from "node:fs/promises";
 import { join } from "node:path";
@@ -13,6 +14,11 @@ import { spawn } from "node:child_process";
  * Create a new enterprise run. Spawns the worker process to execute the agent.
  */
 export async function POST(req: Request) {
+  // Rate limit: max 10 run creations per minute per client
+  if (!checkRateLimit(`runs:${getClientKey(req)}`, 10, 60_000)) {
+    return NextResponse.json({ error: "Too many requests" }, { status: 429 });
+  }
+
   if (!isEnterpriseEnabled()) {
     return NextResponse.json({ error: "Enterprise mode not enabled" }, { status: 503 });
   }
