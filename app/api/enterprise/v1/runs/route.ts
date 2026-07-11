@@ -4,6 +4,7 @@ import { isEnterpriseEnabled } from "@/lib/enterprise/db";
 import { getRunRepository, type RunRecord } from "@/lib/enterprise/run-repo";
 import { checkRateLimit, getClientKey } from "@/lib/enterprise/rate-limit";
 import { authenticateRequest } from "@/lib/enterprise/auth";
+import { requirePermission } from "@/lib/enterprise/rbac";
 import { writeAuditEvent } from "@/lib/enterprise/audit-log";
 import { getEnterpriseDb } from "@/lib/enterprise/db";
 import { randomUUID } from "node:crypto";
@@ -22,10 +23,14 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Too many requests" }, { status: 429 });
   }
 
-  // Authentication
+  // Authentication + RBAC
   const auth = await authenticateRequest(req);
   if (!auth.ok) {
     return NextResponse.json({ error: auth.error }, { status: auth.status });
+  }
+  const perm = requirePermission(auth.user, "run:create");
+  if (!perm.ok) {
+    return NextResponse.json({ error: perm.error }, { status: perm.status });
   }
 
   if (!isEnterpriseEnabled()) {

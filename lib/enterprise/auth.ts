@@ -44,7 +44,7 @@ const OIDC_AUDIENCE = process.env.PI_OIDC_AUDIENCE ?? "";
 
 // ── Token auth ─────────────────────────────────────────────────────────
 
-function authenticateToken(authHeader: string | null): AuthResponse {
+async function authenticateToken(authHeader: string | null): Promise<AuthResponse> {
   if (!STATIC_TOKEN) {
     // No token configured — allow all (dev mode)
     return { ok: true, user: { id: "dev-user" } };
@@ -63,7 +63,21 @@ function authenticateToken(authHeader: string | null): AuthResponse {
     return { ok: false, status: 403, error: "Invalid token" };
   }
 
-  return { ok: true, user: { id: "token-user" } };
+  // Load roles from PG if available
+  let roles: string[] | undefined;
+  try {
+    const { getEnterpriseDb } = await import("./db");
+    const db = await getEnterpriseDb().catch(() => null);
+    if (db) {
+      const result = await db.query(
+        "SELECT roles FROM enterprise_users WHERE id = $1 LIMIT 1",
+        ["token-user"]
+      ).catch(() => null);
+      if (result?.rows[0]) roles = result.rows[0].roles as string[];
+    }
+  } catch { /* ignore */ }
+
+  return { ok: true, user: { id: "token-user", roles } };
 }
 
 // ── OIDC auth (with jose for full signature verification) ────────────
