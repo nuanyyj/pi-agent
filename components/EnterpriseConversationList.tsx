@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useCallback, useState } from "react";
-import { useEnterprise, type EnterpriseConversation } from "@/hooks/useEnterprise";
+import { useEnterprise, type EnterpriseConversation, type EnterpriseRun } from "@/hooks/useEnterprise";
 
 interface Props {
   selectedConversationId: string | null;
@@ -24,10 +24,24 @@ export function EnterpriseConversationList({
 }: Props) {
   const { isEnabled, conversations, conversationsLoading, loadConversations, organizationId, setOrganizationId } = useEnterprise();
   const [orgInput, setOrgInput] = useState(organizationId);
+  const [latestRuns, setLatestRuns] = useState<Map<string, string>>(new Map());
 
   useEffect(() => {
-    if (isEnabled) loadConversations();
-  }, [isEnabled, loadConversations, refreshKey]);
+    if (isEnabled) {
+      loadConversations();
+      fetch('/api/enterprise/v1/runs?organizationId=' + encodeURIComponent(organizationId))
+        .then(r => r.ok ? r.json() : null)
+        .then(data => {
+          if (!data) return;
+          const map = new Map<string, string>();
+          for (const run of data.runs as EnterpriseRun[]) {
+            if (!map.has(run.conversationId)) map.set(run.conversationId, run.status);
+          }
+          setLatestRuns(map);
+        })
+        .catch(() => {});
+    }
+  }, [isEnabled, loadConversations, refreshKey, organizationId]);
 
   const handleOrgChange = useCallback(() => {
     const trimmed = orgInput.trim();
@@ -125,6 +139,9 @@ export function EnterpriseConversationList({
               onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = "transparent"; }}
             >
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                {latestRuns.has(conv.id) && (
+                  <span style={{ width: 6, height: 6, borderRadius: "50%", flexShrink: 0, background: runStatusColor(latestRuns.get(conv.id)!) }} />
+                )}
                 <span style={{ fontSize: 12, fontWeight: isSelected ? 600 : 400, fontFamily: "var(--font-mono)" }}>
                   {shortId}…
                 </span>
@@ -160,6 +177,16 @@ export function EnterpriseConversationList({
       </div>
     </div>
   );
+}
+
+function runStatusColor(status: string): string {
+  switch (status) {
+    case "completed": return "#22c55e";
+    case "running": return "#3b82f6";
+    case "pending": return "#eab308";
+    case "failed": return "#ef4444";
+    default: return "var(--text-dim)";
+  }
 }
 
 function formatTime(iso: string): string {
