@@ -10,7 +10,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "npm run build --workspace @pi-web/enterprise-protocol && tsc -p tsconfig.json --noEmit",
     "test": "vitest run"
   },
   "dependencies": {
