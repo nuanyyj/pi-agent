@@ -31,12 +31,16 @@ export async function GET(
   if (!session || !session.isAlive()) {
     const filePath = await resolveSessionPath(id);
     if (!filePath) {
+      counts.set(id, (counts.get(id) ?? 1) - 1);
+      if ((counts.get(id) ?? 0) <= 0) counts.delete(id);
       return new Response("Session not found", { status: 404 });
     }
     const cwd = SessionManager.open(filePath).getHeader()?.cwd ?? process.cwd();
     try {
       ({ session } = await startRpcSession(id, filePath, cwd));
     } catch (error) {
+      counts.set(id, (counts.get(id) ?? 1) - 1);
+      if ((counts.get(id) ?? 0) <= 0) counts.delete(id);
       return new Response("Failed to start agent", { status: 500 });
     }
   }
@@ -66,8 +70,8 @@ export async function GET(
 
       // Cleanup when client disconnects
       const cleanup = () => {
-    counts.set(id, (counts.get(id) ?? 1) - 1);
-    if ((counts.get(id) ?? 0) <= 0) counts.delete(id);
+        counts.set(id, (counts.get(id) ?? 1) - 1);
+        if ((counts.get(id) ?? 0) <= 0) counts.delete(id);
         clearInterval(heartbeat);
         unsubscribe();
         controller.close();
