@@ -11,7 +11,7 @@ import { randomUUID } from "node:crypto";
 import { writeFile, mkdtemp } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { spawn } from "node:child_process";
+import { spawn, execSync } from "node:child_process";
 
 /**
  * POST /api/enterprise/v1/runs
@@ -169,12 +169,45 @@ async function spawnWorker(record: RunRecord, body: RunBody, repo: Awaited<Retur
 
   await repo.updateRun(record.id, { status: "running", startedAt: new Date().toISOString() });
 
-  const workerPath = join(process.cwd(), "packages", "enterprise-worker", "dist", "main.js");
+  const WORKER_MODE = process.env.PI_WORKER_MODE ?? "local";
+  const DOCKER_IMAGE = process.env.PI_WORKER_DOCKER_IMAGE ?? "pi-enterprise-worker";
 
-  const child = spawn(process.execPath, [workerPath], {
-    env: { ...process.env, PI_RUN_ENVELOPE_PATH: envelopePath, PI_RUN_ID: record.id, PI_POSTGRES_URL: process.env.PI_POSTGRES_URL },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  let child;
+
+  if (WORKER_MODE === "docker") {
+    // Run worker in isolated Docker container
+    try {
+      execSync(`docker image inspect ${DOCKER_IMAGE} --format "{{.Id}}"`, { stdio: "ignore" });
+    } catch {
+      throw new Error(`Docker image ${DOCKER_IMAGE} not found. Build with: docker build -f Dockerfile.worker -t ${DOCKER_IMAGE} .`);
+    }
+
+    const pgUrl = process.env.PI_POSTGRES_URL ?? "";
+    const dockerArgs = [
+      "run", "--rm",
+      "--network", "host", // Share host network for PG access
+      "--memory", "512m",
+      "--cpus", "1",
+      "--read-only",
+      "--tmpfs", "/tmp:size=100m",
+      "-e", `PI_RUN_ENVELOPE_PATH=/tmp/envelope.json`,
+      "-e", `PI_RUN_ID=${record.id}`,
+      "-e", `PI_POSTGRES_URL=${pgUrl}`,
+      "-v", `${envelopePath}:/tmp/envelope.json:ro`,
+      DOCKER_IMAGE,
+    ];
+
+    child = spawn("docker", dockerArgs, {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  } else {
+    // Local process mode (default)
+    const workerPath = join(process.cwd(), "packages", "enterprise-worker", "dist", "main.js");
+    child = spawn(process.execPath, [workerPath], {
+      env: { ...process.env, PI_RUN_ENVELOPE_PATH: envelopePath, PI_RUN_ID: record.id, PI_POSTGRES_URL: process.env.PI_POSTGRES_URL },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  }
 
   await repo.updateRun(record.id, { workerPid: child.pid ?? undefined });
 

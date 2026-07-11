@@ -1,0 +1,30 @@
+# Worker sandbox — runs agent code in an isolated container
+# Usage: Built automatically by the control plane when PI_WORKER_MODE=docker
+FROM node:22.19.0-bookworm-slim
+
+WORKDIR /app
+
+# Install git (needed by coding agent tools)
+RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
+
+# Copy worker and dependencies
+COPY packages/enterprise-worker/dist ./packages/enterprise-worker/dist
+COPY packages/enterprise-protocol/dist ./packages/enterprise-protocol/dist
+COPY packages/enterprise-worker/package.json ./packages/enterprise-worker/
+COPY packages/enterprise-protocol/package.json ./packages/enterprise-protocol/
+
+# Copy pi-coding-agent tools (if available)
+COPY node_modules/@earendil-works ./node_modules/@earendil-works
+
+# Create non-root user for execution
+RUN addgroup --system --gid 1001 pibot \
+ && adduser --system --uid 1001 pibot \
+ && mkdir -p /workspace && chown pibot:pibot /workspace
+
+USER pibot
+WORKDIR /workspace
+
+ENV NODE_ENV=production
+ENV PI_WORKER_SANDBOX=true
+
+CMD ["node", "/app/packages/enterprise-worker/dist/main.js"]
