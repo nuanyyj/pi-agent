@@ -6,9 +6,10 @@ import { createSessionBroker } from "@pi-web/enterprise-session-broker";
 /**
  * GET /api/enterprise/v1/conversations/[id]
  * Get a single enterprise conversation with its entries.
+ * Query params: organizationId (required for org-scoped access check)
  */
 export async function GET(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   if (!isEnterpriseEnabled()) {
@@ -17,13 +18,16 @@ export async function GET(
 
   try {
     const { id } = await params;
+    const url = new URL(req.url);
+    const organizationId = url.searchParams.get("organizationId") ?? "default";
+
     const db = await getEnterpriseDb();
     if (!db) {
       return NextResponse.json({ error: "Enterprise database not available" }, { status: 503 });
     }
 
     const broker = createSessionBroker(db);
-    const snapshot = await broker.openSessionById(id, "");
+    const snapshot = await broker.openSessionById(id, organizationId);
 
     return NextResponse.json({
       id: snapshot.metadata.id,

@@ -3,9 +3,17 @@ import { getRunRepository } from "@/lib/enterprise/run-repo";
 
 export const dynamic = "force-dynamic";
 
+// Limit concurrent SSE connections per run
+const MAX_SSE_CONNECTIONS = 10;
+declare global { var __piEnterpriseSseCount: Map<string, number> | undefined; }
+function getSseCount(): Map<string, number> {
+  if (!globalThis.__piEnterpriseSseCount) globalThis.__piEnterpriseSseCount = new Map();
+  return globalThis.__piEnterpriseSseCount;
+}
+
 /**
  * GET /api/enterprise/v1/runs/[id]/events
- * SSE stream of run events. Reads from PG when available, falls back to memory.
+ * SSE stream of run events. Reads from PG with 1s polling.
  */
 export async function GET(
   req: Request,
@@ -16,10 +24,21 @@ export async function GET(
   }
 
   const { id } = await params;
+
+  // SSE connection limit
+  const counts = getSseCount();
+  const currentCount = counts.get(id) ?? 0;
+  if (currentCount >= MAX_SSE_CONNECTIONS) {
+    return new Response("Too many connections", { status: 429 });
+  }
+  counts.set(id, currentCount + 1);
+
   const repo = await getRunRepository();
   const run = await repo.getRun(id);
 
   if (!run) {
+    counts.set(id, (counts.get(id) ?? 1) - 1);
+    if ((counts.get(id) ?? 0) <= 0) counts.delete(id);
     return new Response("Run not found", { status: 404 });
   }
 
@@ -43,14 +62,12 @@ export async function GET(
       let lastSeq = 0;
       const poll = async () => {
         try {
-          // Send new events
           const events = await repo.getRunEvents(id, lastSeq);
           for (const event of events) {
             sendEvent(event);
             lastSeq = event.seq;
           }
 
-          // Check terminal state
           const current = await repo.getRun(id);
           if (!current || current.status === "completed" || current.status === "failed" || current.status === "cancelled") {
             sendEvent({
@@ -59,23 +76,25 @@ export async function GET(
               response: current?.response,
               error: current?.error,
             });
-            clearInterval(interval);
+            cleanup();
             controller.close();
           }
-        } catch (err) {
+        } catch {
           sendEvent({ type: "error", message: "Poll failed" });
         }
       };
 
-      // Initial poll
       poll();
-
-      // Continue polling
       const interval = setInterval(poll, 1000);
 
-      // Cleanup on client disconnect
-      req.signal?.addEventListener("abort", () => {
+      const cleanup = () => {
+        counts.set(id, (counts.get(id) ?? 1) - 1);
+        if ((counts.get(id) ?? 0) <= 0) counts.delete(id);
         clearInterval(interval);
+      };
+
+      req.signal?.addEventListener("abort", () => {
+        cleanup();
         try { controller.close(); } catch { /* already closed */ }
       });
     },
