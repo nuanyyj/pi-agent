@@ -1,5 +1,7 @@
 FROM node:22.19.0-bookworm-slim AS build
 WORKDIR /src
+ARG NPM_CONFIG_REGISTRY=https://registry.npmjs.org/
+ENV NPM_CONFIG_REGISTRY=$NPM_CONFIG_REGISTRY
 COPY package.json package-lock.json ./
 COPY packages/enterprise-protocol/package.json ./packages/enterprise-protocol/package.json
 COPY packages/enterprise-worker/package.json ./packages/enterprise-worker/package.json
