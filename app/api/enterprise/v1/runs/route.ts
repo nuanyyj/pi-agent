@@ -3,6 +3,7 @@ import { sanitizeError } from "@/lib/api-errors";
 import { isEnterpriseEnabled } from "@/lib/enterprise/db";
 import { getRunRepository, type RunRecord } from "@/lib/enterprise/run-repo";
 import { checkRateLimit, getClientKey } from "@/lib/enterprise/rate-limit";
+import { authenticateRequest } from "@/lib/enterprise/auth";
 import { writeAuditEvent } from "@/lib/enterprise/audit-log";
 import { getEnterpriseDb } from "@/lib/enterprise/db";
 import { randomUUID } from "node:crypto";
@@ -19,6 +20,12 @@ export async function POST(req: Request) {
   // Rate limit: max 10 run creations per minute per client
   if (!checkRateLimit(`runs:${getClientKey(req)}`, 10, 60_000)) {
     return NextResponse.json({ error: "Too many requests" }, { status: 429 });
+  }
+
+  // Authentication
+  const auth = await authenticateRequest(req);
+  if (!auth.ok) {
+    return NextResponse.json({ error: auth.error }, { status: auth.status });
   }
 
   if (!isEnterpriseEnabled()) {
