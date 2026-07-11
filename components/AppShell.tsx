@@ -322,7 +322,7 @@ export function AppShell() {
     <>
       {enterpriseMode ? (
         <>
-        <EnterpriseConversationList
+        <EnterpriseErrorBoundary><EnterpriseConversationList
           selectedConversationId={selectedEnterpriseConversation?.id ?? null}
           onSelectConversation={setSelectedEnterpriseConversation}
           onDeleteConversation={async (id) => {
@@ -341,7 +341,7 @@ export function AppShell() {
             setEnterpriseRefreshKey((k) => k + 1);
           }}
           refreshKey={enterpriseRefreshKey}
-        />
+        /></EnterpriseErrorBoundary>
         {/* Audit log button — enterprise mode only */}
         <div style={{ padding: "4px 10px", flexShrink: 0 }}>
           <button
@@ -360,6 +360,23 @@ export function AppShell() {
               <polyline points="14 2 14 8 20 8" />
             </svg>
             Audit Log
+          </button>
+          <button
+            onClick={() => setEnterpriseView(enterpriseView === "dashboard" ? "chat" : "dashboard")}
+            style={{
+              width: "100%", height: 30, fontSize: 12,
+              background: enterpriseView === "dashboard" ? "var(--accent)" : "transparent",
+              color: enterpriseView === "dashboard" ? "#fff" : "var(--text-muted)",
+              border: "1px solid var(--border)", borderRadius: 6,
+              cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+              marginTop: 4,
+            }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="3" width="18" height="18" rx="2" />
+              <path d="M3 9h18" />
+            </svg>
+            Dashboard
           </button>
         </div>
         </>
@@ -1019,11 +1036,13 @@ export function AppShell() {
 
         {/* Chat content */}
         <div style={{ flex: 1, overflow: "hidden", position: "relative" }}>
-          {showChat && enterpriseMode && enterpriseView === "audit" ? (
-            <EnterpriseAuditLog organizationId={enterprise.organizationId} />
+          {showChat && enterpriseMode && enterpriseView === "dashboard" ? (
+            <EnterpriseErrorBoundary><RunDashboard organizationId={enterprise.organizationId} /></EnterpriseErrorBoundary>
+          ) : showChat && enterpriseMode && enterpriseView === "audit" ? (
+            <EnterpriseErrorBoundary><EnterpriseAuditLog organizationId={enterprise.organizationId} /></EnterpriseErrorBoundary>
           ) : showChat && enterpriseMode ? (
             selectedEnterpriseConversation ? (
-              <EnterpriseChatPanel conversation={selectedEnterpriseConversation} />
+              <EnterpriseErrorBoundary><EnterpriseChatPanel conversation={selectedEnterpriseConversation} /></EnterpriseErrorBoundary>
             ) : (
               <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontSize: 14 }}>
                 Select or create a conversation from the sidebar
@@ -1145,7 +1164,9 @@ export function AppShell() {
 }
 import { EnterpriseConversationList } from "./EnterpriseConversationList";
 import { EnterpriseAuditLog } from "./EnterpriseAuditLog";
+import { EnterpriseErrorBoundary } from "./EnterpriseErrorBoundary";
+import { RunDashboard } from "./RunDashboard";
 import type { EnterpriseConversation } from "@/hooks/useEnterprise";
   const [selectedEnterpriseConversation, setSelectedEnterpriseConversation] = useState<EnterpriseConversation | null>(null);
   const [enterpriseRefreshKey, setEnterpriseRefreshKey] = useState(0);
-  const [enterpriseView, setEnterpriseView] = useState<"chat" | "audit">("chat");
+  const [enterpriseView, setEnterpriseView] = useState<"chat" | "audit" | "dashboard">("chat");
