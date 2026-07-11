@@ -12,10 +12,15 @@ describe("preflightRun", () => {
       attempt: 1,
       workspaceRoot: "/workspace/run-1",
       toolNames: ["read", "grep"],
+      modelProvider: "openai",
+      modelId: "gpt-4o",
+      userInput: "Hello, world!",
     })).toEqual({
       protocolVersion: 1,
       runtimeProfile: "agent-harness-v1",
       toolNames: ["read", "grep"],
+      modelProvider: "openai",
+      modelId: "gpt-4o",
       workerKind: "stage-a-worker",
     });
   });

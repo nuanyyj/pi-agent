@@ -10,6 +10,10 @@ export declare const RunEnvelopeSchema: Type.TObject<{
     attempt: Type.TInteger;
     workspaceRoot: Type.TString;
     toolNames: Type.TArray<Type.TUnion<[Type.TLiteral<"read">, Type.TLiteral<"bash">, Type.TLiteral<"edit">, Type.TLiteral<"write">, Type.TLiteral<"grep">, Type.TLiteral<"find">, Type.TLiteral<"ls">]>>;
+    modelProvider: Type.TString;
+    modelId: Type.TString;
+    userInput: Type.TString;
+    systemPrompt: Type.TOptional<Type.TString>;
 }>;
 export type RunEnvelope = Static<typeof RunEnvelopeSchema>;
 export declare function parseRunEnvelope(input: unknown): RunEnvelope;

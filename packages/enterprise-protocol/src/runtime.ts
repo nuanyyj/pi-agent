@@ -25,6 +25,13 @@ export const RunEnvelopeSchema = Type.Object(
     attempt: Type.Integer({ minimum: 1 }),
     workspaceRoot: Type.String({ minLength: 1 }),
     toolNames: Type.Array(EnterpriseCodingToolNameSchema),
+    // Model configuration
+    modelProvider: Type.String({ minLength: 1 }),
+    modelId: Type.String({ minLength: 1 }),
+    // User input
+    userInput: Type.String({ minLength: 1 }),
+    // Optional system prompt override
+    systemPrompt: Type.Optional(Type.String()),
   },
   { additionalProperties: false },
 );

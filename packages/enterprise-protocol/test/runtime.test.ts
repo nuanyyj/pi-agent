@@ -10,6 +10,9 @@ const validEnvelope = {
   attempt: 1,
   workspaceRoot: "/workspace/run-1",
   toolNames: ["read", "grep"],
+  modelProvider: "openai",
+  modelId: "gpt-4o",
+  userInput: "Hello, world!",
 };
 
 describe("parseRunEnvelope", () => {

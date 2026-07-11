@@ -6,6 +6,8 @@ export function preflightRun(input: unknown) {
     protocolVersion: envelope.protocolVersion,
     runtimeProfile: envelope.runtimeProfile,
     toolNames: Object.freeze([...envelope.toolNames]),
+    modelProvider: envelope.modelProvider,
+    modelId: envelope.modelId,
     workerKind: "stage-a-worker" as const,
   });
 }
