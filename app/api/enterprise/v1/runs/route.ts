@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { sanitizeError } from "@/lib/api-errors";
 import { isEnterpriseEnabled } from "@/lib/enterprise/db";
-import { createRun, listRuns, type RunRecord } from "@/lib/enterprise/run-store";
+import { getRunRepository, type RunRecord } from "@/lib/enterprise/run-repo";
 import { randomUUID } from "node:crypto";
 import { writeFile, mkdtemp } from "node:fs/promises";
 import { join } from "node:path";
@@ -36,32 +36,32 @@ export async function POST(req: Request) {
       );
     }
 
+    const repo = await getRunRepository();
     const runId = randomUUID();
-    const attempt = 1;
     const now = new Date().toISOString();
 
     const record: RunRecord = {
       id: runId,
       conversationId: body.conversationId,
       organizationId: body.organizationId ?? "default",
-      runId,
-      attempt,
       status: "pending",
       modelProvider: body.modelProvider,
       modelId: body.modelId,
       userInput: body.userInput,
-      events: [],
+      eventCount: 0,
       createdAt: now,
     };
 
-    createRun(record);
+    await repo.createRun(record);
 
     // Spawn worker process asynchronously
-    spawnWorker(record, body).catch((err) => {
+    spawnWorker(record, body, repo).catch((err) => {
       console.error("[enterprise-run] worker spawn failed:", err);
-      record.status = "failed";
-      record.error = err instanceof Error ? err.message : String(err);
-      record.completedAt = new Date().toISOString();
+      repo.updateRun(runId, {
+        status: "failed",
+        error: err instanceof Error ? err.message : String(err),
+        completedAt: new Date().toISOString(),
+      }).catch(() => {});
     });
 
     return NextResponse.json({
@@ -91,23 +91,10 @@ export async function GET(req: Request) {
     const conversationId = url.searchParams.get("conversationId") ?? undefined;
     const organizationId = url.searchParams.get("organizationId") ?? undefined;
 
-    const runs = listRuns({ conversationId, organizationId });
+    const repo = await getRunRepository();
+    const runs = await repo.listRuns({ conversationId, organizationId });
 
-    return NextResponse.json({
-      runs: runs.map((r) => ({
-        id: r.id,
-        conversationId: r.conversationId,
-        status: r.status,
-        modelProvider: r.modelProvider,
-        modelId: r.modelId,
-        response: r.response,
-        error: r.error,
-        eventCount: r.events.length,
-        createdAt: r.createdAt,
-        startedAt: r.startedAt,
-        completedAt: r.completedAt,
-      })),
-    });
+    return NextResponse.json({ runs });
   } catch (error) {
     return NextResponse.json({ error: sanitizeError(error) }, { status: 500 });
   }
@@ -126,8 +113,7 @@ interface RunBody {
   toolNames?: string[];
 }
 
-async function spawnWorker(record: RunRecord, body: RunBody): Promise<void> {
-  // Write envelope to temp file
+async function spawnWorker(record: RunRecord, body: RunBody, repo: Awaited<ReturnType<typeof getRunRepository>>): Promise<void> {
   const tmpDir = await mkdtemp(join(tmpdir(), "pi-run-"));
   const envelopePath = join(tmpDir, "envelope.json");
 
@@ -136,8 +122,8 @@ async function spawnWorker(record: RunRecord, body: RunBody): Promise<void> {
     runtimeProfile: "agent-harness-v1",
     organizationId: record.organizationId,
     conversationId: body.conversationId,
-    runId: record.runId,
-    attempt: record.attempt,
+    runId: record.id,
+    attempt: 1,
     workspaceRoot: body.workspaceRoot ?? process.cwd(),
     toolNames: body.toolNames ?? ["read", "bash", "edit", "write"],
     modelProvider: body.modelProvider,
@@ -148,61 +134,54 @@ async function spawnWorker(record: RunRecord, body: RunBody): Promise<void> {
 
   await writeFile(envelopePath, JSON.stringify(envelope), "utf8");
 
-  record.status = "running";
-  record.startedAt = new Date().toISOString();
+  await repo.updateRun(record.id, { status: "running", startedAt: new Date().toISOString() });
 
-  // Resolve worker entry point
-  const workerPath = join(
-    process.cwd(),
-    "packages",
-    "enterprise-worker",
-    "dist",
-    "main.js",
-  );
+  const workerPath = join(process.cwd(), "packages", "enterprise-worker", "dist", "main.js");
 
   const child = spawn(process.execPath, [workerPath], {
-    env: {
-      ...process.env,
-      PI_RUN_ENVELOPE_PATH: envelopePath,
-    },
+    env: { ...process.env, PI_RUN_ENVELOPE_PATH: envelopePath },
     stdio: ["ignore", "pipe", "pipe"],
   });
 
-  record.workerPid = child.pid;
+  await repo.updateRun(record.id, { workerPid: child.pid ?? undefined });
 
   let stdout = "";
   let stderr = "";
 
-  child.stdout.on("data", (chunk: Buffer) => {
-    stdout += chunk.toString();
-  });
+  child.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
+  child.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
 
-  child.stderr.on("data", (chunk: Buffer) => {
-    stderr += chunk.toString();
-  });
-
-  child.on("close", (code) => {
-    record.completedAt = new Date().toISOString();
-    record.workerPid = undefined;
-
+  child.on("close", async (code) => {
     if (code === 0) {
       try {
-        const result = JSON.parse(stdout.trim().split("\n").pop() ?? "{}");
-        record.status = "completed";
-        record.response = result.response ?? stdout;
+        const lines = stdout.trim().split("\n");
+        const result = JSON.parse(lines[lines.length - 1] ?? "{}");
+        await repo.updateRun(record.id, {
+          status: "completed",
+          response: result.response ?? stdout,
+          completedAt: new Date().toISOString(),
+        });
       } catch {
-        record.status = "completed";
-        record.response = stdout;
+        await repo.updateRun(record.id, {
+          status: "completed",
+          response: stdout,
+          completedAt: new Date().toISOString(),
+        });
       }
     } else {
-      record.status = "failed";
-      record.error = stderr || `Worker exited with code ${code}`;
+      await repo.updateRun(record.id, {
+        status: "failed",
+        error: stderr || `Worker exited with code ${code}`,
+        completedAt: new Date().toISOString(),
+      });
     }
   });
 
-  child.on("error", (err) => {
-    record.status = "failed";
-    record.error = err.message;
-    record.completedAt = new Date().toISOString();
+  child.on("error", async (err) => {
+    await repo.updateRun(record.id, {
+      status: "failed",
+      error: err.message,
+      completedAt: new Date().toISOString(),
+    });
   });
 }

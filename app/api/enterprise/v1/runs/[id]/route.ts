@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 import { sanitizeError } from "@/lib/api-errors";
 import { isEnterpriseEnabled } from "@/lib/enterprise/db";
-import { getRun } from "@/lib/enterprise/run-store";
+import { getRunRepository } from "@/lib/enterprise/run-repo";
 
 /**
  * GET /api/enterprise/v1/runs/[id]
- * Get a single enterprise run with its current status and events.
+ * Get a single enterprise run with its current status.
  */
 export async function GET(
   _req: Request,
@@ -17,27 +17,14 @@ export async function GET(
 
   try {
     const { id } = await params;
-    const run = getRun(id);
+    const repo = await getRunRepository();
+    const run = await repo.getRun(id);
 
     if (!run) {
       return NextResponse.json({ error: "Run not found" }, { status: 404 });
     }
 
-    return NextResponse.json({
-      id: run.id,
-      conversationId: run.conversationId,
-      organizationId: run.organizationId,
-      status: run.status,
-      modelProvider: run.modelProvider,
-      modelId: run.modelId,
-      userInput: run.userInput,
-      response: run.response,
-      error: run.error,
-      eventCount: run.events.length,
-      createdAt: run.createdAt,
-      startedAt: run.startedAt,
-      completedAt: run.completedAt,
-    });
+    return NextResponse.json(run);
   } catch (error) {
     return NextResponse.json({ error: sanitizeError(error) }, { status: 500 });
   }

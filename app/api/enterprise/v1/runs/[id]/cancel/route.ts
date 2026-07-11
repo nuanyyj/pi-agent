@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { sanitizeError } from "@/lib/api-errors";
 import { isEnterpriseEnabled } from "@/lib/enterprise/db";
-import { getRun, updateRun } from "@/lib/enterprise/run-store";
+import { getRunRepository } from "@/lib/enterprise/run-repo";
 
 /**
  * POST /api/enterprise/v1/runs/[id]/cancel
@@ -17,7 +17,8 @@ export async function POST(
 
   try {
     const { id } = await params;
-    const run = getRun(id);
+    const repo = await getRunRepository();
+    const run = await repo.getRun(id);
 
     if (!run) {
       return NextResponse.json({ error: "Run not found" }, { status: 404 });
@@ -30,18 +31,15 @@ export async function POST(
       );
     }
 
-    // Signal abort if controller exists
-    run.abortController?.abort();
+    // Signal abort if controller exists (in-memory mode)
+    repo.getAbortController(id)?.abort();
 
-    updateRun(id, {
+    await repo.updateRun(id, {
       status: "cancelled",
       completedAt: new Date().toISOString(),
     });
 
-    return NextResponse.json({
-      id: run.id,
-      status: "cancelled",
-    });
+    return NextResponse.json({ id, status: "cancelled" });
   } catch (error) {
     return NextResponse.json({ error: sanitizeError(error) }, { status: 500 });
   }

@@ -1,11 +1,11 @@
 import { isEnterpriseEnabled } from "@/lib/enterprise/db";
-import { getRun } from "@/lib/enterprise/run-store";
+import { getRunRepository } from "@/lib/enterprise/run-repo";
 
 export const dynamic = "force-dynamic";
 
 /**
  * GET /api/enterprise/v1/runs/[id]/events
- * SSE stream of run events. Clients connect and receive real-time updates.
+ * SSE stream of run events. Reads from PG when available, falls back to memory.
  */
 export async function GET(
   req: Request,
@@ -16,7 +16,8 @@ export async function GET(
   }
 
   const { id } = await params;
-  const run = getRun(id);
+  const repo = await getRunRepository();
+  const run = await repo.getRun(id);
 
   if (!run) {
     return new Response("Run not found", { status: 404 });
@@ -36,58 +37,41 @@ export async function GET(
       send("retry: 3000\n\n");
 
       // Send current status
-      sendEvent({
-        type: "status",
-        status: run.status,
-        eventCount: run.events.length,
-      });
+      sendEvent({ type: "status", status: run.status, eventCount: run.eventCount });
 
-      // Send all existing events
-      for (const event of run.events) {
-        sendEvent(event);
-      }
+      // Poll for events and status changes
+      let lastSeq = 0;
+      const poll = async () => {
+        try {
+          // Send new events
+          const events = await repo.getRunEvents(id, lastSeq);
+          for (const event of events) {
+            sendEvent(event);
+            lastSeq = event.seq;
+          }
 
-      // If run is already terminal, send completion and close
-      if (run.status === "completed" || run.status === "failed" || run.status === "cancelled") {
-        sendEvent({
-          type: "terminal",
-          status: run.status,
-          response: run.response,
-          error: run.error,
-        });
-        controller.close();
-        return;
-      }
-
-      // Poll for new events while run is active
-      let lastEventCount = run.events.length;
-      const interval = setInterval(() => {
-        const currentRun = getRun(id);
-        if (!currentRun) {
-          sendEvent({ type: "error", message: "Run not found" });
-          clearInterval(interval);
-          controller.close();
-          return;
+          // Check terminal state
+          const current = await repo.getRun(id);
+          if (!current || current.status === "completed" || current.status === "failed" || current.status === "cancelled") {
+            sendEvent({
+              type: "terminal",
+              status: current?.status ?? "unknown",
+              response: current?.response,
+              error: current?.error,
+            });
+            clearInterval(interval);
+            controller.close();
+          }
+        } catch (err) {
+          sendEvent({ type: "error", message: "Poll failed" });
         }
+      };
 
-        // Send new events
-        while (lastEventCount < currentRun.events.length) {
-          sendEvent(currentRun.events[lastEventCount]);
-          lastEventCount++;
-        }
+      // Initial poll
+      poll();
 
-        // Check for terminal state
-        if (currentRun.status === "completed" || currentRun.status === "failed" || currentRun.status === "cancelled") {
-          sendEvent({
-            type: "terminal",
-            status: currentRun.status,
-            response: currentRun.response,
-            error: currentRun.error,
-          });
-          clearInterval(interval);
-          controller.close();
-        }
-      }, 500);
+      // Continue polling
+      const interval = setInterval(poll, 1000);
 
       // Cleanup on client disconnect
       req.signal?.addEventListener("abort", () => {
