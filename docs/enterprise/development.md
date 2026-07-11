@@ -116,12 +116,46 @@ Runtime Stage B is not part of Phase 0A. Stage B is the later compatibility phas
 - Object storage must not become the policy or authorization authority.
 - Phase 0A only bootstraps MinIO and checks health; artifact APIs, authorization, lifecycle, and retention are later-phase work.
 
-## Phase 0B handoff
+## Phase 0B: Versioned Session Broker
 
-The next phase must implement the PostgreSQL versioned session broker:
+Phase 0B implements the PostgreSQL-backed session broker that replaces JSONL
+for enterprise session persistence. The broker enforces atomic compare-and-set
+mutations so concurrent writes produce version conflicts instead of data loss.
 
-- schema and migrations;
-- atomic append-and-advance semantics;
-- leaf movement and stale-version rejection;
-- restart and conflict tests;
-- no JSONL enterprise persistence.
+### Package: `@pi-web/enterprise-session-broker`
+
+Location: `packages/enterprise-session-broker`
+
+Key modules:
+- `src/db.ts` — PostgreSQL Pool connection, schema bootstrap
+- `src/broker.ts` — SessionBroker with transactional create/open/list/fork/delete, appendAndAdvance, moveLeaf
+- `src/storage.ts` — BrokeredSessionStorage implementing SessionStorage<EnterpriseSessionMetadata>
+- `src/repo.ts` — PostgresSessionRepo implementing SessionRepo
+- `src/types.ts` — TypeScript interfaces for all broker contracts
+
+### Running broker tests
+
+Start PostgreSQL first:
+
+```powershell
+docker compose --env-file .env.enterprise.example -f compose.enterprise.yml up -d postgres
+```
+
+Run broker tests:
+
+```powershell
+$env:PI_POSTGRES_URL = "postgres://pi_enterprise:replace-for-local-development@127.0.0.1:5432/pi_enterprise"
+npx vitest run packages/enterprise-session-broker/test/ -v
+```
+
+### Runtime Stage A wiring
+
+The enterprise worker (`@pi-web/enterprise-worker`) can create an AgentHarness
+backed by the broker via `createBrokeredHarness()` in `src/brokered-runtime.ts`.
+This factory accepts a RunEnvelope and a database connection, opens or creates
+the conversation session in PostgreSQL, and returns the harness with the session.
+
+### Design documents
+
+- Spec: `docs/superpowers/specs/2026-07-11-enterprise-phase-0b-versioned-session-broker-design.md`
+- Plan: `docs/superpowers/plans/2026-07-11-enterprise-phase-0b-versioned-session-broker.md`

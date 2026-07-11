@@ -17,6 +17,7 @@
     "@earendil-works/pi-agent-core": "0.80.6",
     "@earendil-works/pi-ai": "0.80.6",
     "@earendil-works/pi-coding-agent": "0.80.6",
-    "@pi-web/enterprise-protocol": "0.1.0"
+    "@pi-web/enterprise-protocol": "0.1.0",
+    "@pi-web/enterprise-session-broker": "0.1.0"
   }
 }
