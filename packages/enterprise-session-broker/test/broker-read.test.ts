@@ -241,9 +241,10 @@ describe("session broker reads", () => {
       organizationId: orgId,
       workspaceRoot: "/workspace/g",
     });
-    await broker.deleteSession(created.metadata.id);
+    await broker.deleteSession(created.metadata.id, orgId);
     await expect(
       broker.openSessionById(created.metadata.id),
     ).rejects.toThrow(/deleted/i);
   });
 });
+

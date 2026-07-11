@@ -71,5 +71,6 @@ export interface SessionBroker {
     sourceMetadata: EnterpriseSessionMetadata,
     options: CreateEnterpriseSessionOptions & { entryId?: string; position?: "before" | "at" },
   ): Promise<BrokerSessionSnapshot>;
-  deleteSession(sessionId: string): Promise<void>;
+  deleteSession(sessionId: string, organizationId: string): Promise<void>;
 }
+

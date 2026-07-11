@@ -26,7 +26,7 @@ export class PostgresSessionRepo {
         return this.broker.listSessions(options);
     }
     async delete(metadata) {
-        await this.broker.deleteSession(metadata.id);
+        await this.broker.deleteSession(metadata.id, metadata.organizationId);
     }
     async fork(source, options) {
         const snapshot = await this.broker.forkSession(source, {

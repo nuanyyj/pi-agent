@@ -1,4 +1,4 @@
-import { AgentHarness, type AgentHarnessOptions, type AgentTool, type Session } from "@earendil-works/pi-agent-core";
+import { AgentHarness, SessionError, type AgentHarnessOptions, type AgentTool, type Session } from "@earendil-works/pi-agent-core";
 import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import {
   createSessionBroker,
@@ -21,45 +21,33 @@ export interface BrokeredHarnessResult {
   metadata: EnterpriseSessionMetadata;
 }
 
-/**
- * Create an AgentHarness backed by a PostgreSQL-brokered session.
- *
- * Opens an existing enterprise session for the conversation or creates a new
- * one. The session is persisted through the versioned broker so mutations
- * survive worker restarts and reject stale concurrent writes.
- */
 export async function createBrokeredHarness(
   options: CreateBrokeredHarnessOptions,
 ): Promise<BrokeredHarnessResult> {
   const { db, envelope, ...harnessOptions } = options;
-
   const broker = createSessionBroker(db);
   const repo = new PostgresSessionRepo(broker);
-
-  // Try to open an existing session for this conversation, or create one.
   const metadata: EnterpriseSessionMetadata = {
     id: envelope.conversationId,
     createdAt: new Date().toISOString(),
     organizationId: envelope.organizationId,
     workspaceRoot: envelope.workspaceRoot,
   };
-
   let session: Session<EnterpriseSessionMetadata>;
   try {
     session = await repo.open(metadata);
-  } catch {
+  } catch (err: unknown) {
+    if (!(err instanceof SessionError && err.code === "not_found")) throw err;
     session = await repo.create({
       organizationId: envelope.organizationId,
       workspaceRoot: envelope.workspaceRoot,
       id: envelope.conversationId,
     });
   }
-
   const tools: AgentTool[] = createApprovedCodingTools(
     envelope.workspaceRoot,
     envelope.toolNames as readonly EnterpriseCodingToolName[],
   );
-
   const harness = new AgentHarness({
     ...harnessOptions,
     session,
@@ -67,7 +55,6 @@ export async function createBrokeredHarness(
     tools,
     activeToolNames: tools.map((t) => t.name),
   });
-
   return {
     harness,
     session,

@@ -261,9 +261,12 @@ export function createSessionBroker(db) {
                 };
             });
         },
-        async deleteSession(sessionId) {
+        async deleteSession(sessionId, organizationId) {
             await db.transaction(async (tx) => {
-                await loadSessionRow(tx, sessionId);
+                const row = await loadSessionRow(tx, sessionId);
+                if (row.organization_id !== organizationId) {
+                    throw new SessionError("invalid_session", `Session ${sessionId} does not belong to organization ${organizationId}`);
+                }
                 await tx.query(`update enterprise_sessions set deleted_at = now(), updated_at = now() where id = $1`, [sessionId]);
                 return undefined;
             });

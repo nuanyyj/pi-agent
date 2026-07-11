@@ -57,7 +57,7 @@ export class PostgresSessionRepo
   }
 
   async delete(metadata: EnterpriseSessionMetadata): Promise<void> {
-    await this.broker.deleteSession(metadata.id);
+    await this.broker.deleteSession(metadata.id, metadata.organizationId);
   }
 
   async fork(
@@ -91,3 +91,4 @@ export class PostgresSessionRepo
     });
   }
 }
+
