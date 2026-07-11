@@ -58,6 +58,7 @@ interface EnterpriseContextValue {
   }) => Promise<EnterpriseRun>;
   getRun: (id: string) => Promise<EnterpriseRun>;
   cancelRun: (id: string) => Promise<void>;
+  deleteConversation: (id: string) => Promise<void>;
   listRuns: (conversationId?: string) => Promise<EnterpriseRun[]>;
 
   // SSE event streaming
@@ -151,6 +152,14 @@ export function EnterpriseProvider({ children }: { children: ReactNode }) {
     return (await res.json()) as EnterpriseRun;
   }, []);
 
+  const deleteConversation = useCallback(async (id: string): Promise<void> => {
+    const res = await fetch(`/api/enterprise/v1/conversations/${encodeURIComponent(id)}?organizationId=${encodeURIComponent(organizationId)}`, {
+      method: "DELETE",
+    });
+    if (!res.ok) throw new Error("Failed to delete conversation");
+    setConversations((prev) => prev.filter((c) => c.id !== id));
+  }, [organizationId]);
+
   const cancelRun = useCallback(async (id: string): Promise<void> => {
     const res = await fetch(`/api/enterprise/v1/runs/${encodeURIComponent(id)}/cancel`, {
       method: "POST",
@@ -236,6 +245,7 @@ export function EnterpriseProvider({ children }: { children: ReactNode }) {
     createRun,
     getRun,
     cancelRun,
+    deleteConversation,
     listRuns,
     subscribeRunEvents,
   };

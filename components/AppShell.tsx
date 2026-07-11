@@ -324,6 +324,16 @@ export function AppShell() {
         <EnterpriseConversationList
           selectedConversationId={selectedEnterpriseConversation?.id ?? null}
           onSelectConversation={setSelectedEnterpriseConversation}
+          onDeleteConversation={async (id) => {
+            try {
+              await enterprise.deleteConversation(id);
+              if (selectedEnterpriseConversation?.id === id) {
+                setSelectedEnterpriseConversation(null);
+              }
+            } catch (err) {
+              console.error("[enterprise] delete conversation failed:", err);
+            }
+          }}
           onNewConversation={async () => {
             const conv = await enterprise.createConversation();
             setSelectedEnterpriseConversation(conv);
