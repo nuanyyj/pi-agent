@@ -3,6 +3,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useEnterprise, type EnterpriseConversation, type EnterpriseRun, type EnterpriseRunEvent } from "@/hooks/useEnterprise";
 import { MessageView } from "./MessageView";
+import { ArtifactList } from "./ArtifactList";
 import { mapEventsToMessages, createUserMessage } from "@/lib/enterprise/event-mapper";
 import type { AgentMessage } from "@/lib/types";
 
@@ -217,6 +218,11 @@ export function EnterpriseChatPanel({ conversation }: { conversation: Enterprise
 
         <div ref={messagesEndRef} />
       </div>
+
+      {/* Artifacts — shown when a run exists */}
+      {activeRun && (
+        <ArtifactList runId={activeRun.id} allowUpload />
+      )}
 
       {/* Input area */}
       <div style={{
