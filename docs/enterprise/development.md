@@ -191,13 +191,21 @@ npx tsx packages/enterprise-worker/src/main.ts
 ### Control plane and Docker worker configuration
 
 Enterprise mode defaults to OIDC. The issuer must provide `sub`, an organization
-claim (`org_id` or `organization`), and a roles claim (`roles` by default).
+claim (`org_id` by default), and a roles claim (`roles` by default). Browser
+login uses Authorization Code + PKCE. Provider tokens never enter browser
+storage or the session cookie; the cookie contains a random opaque token whose
+SHA-256 digest and revocation state are stored in PostgreSQL.
 
 ```powershell
 $env:PI_AUTH_MODE = "oidc"
 $env:PI_OIDC_ISSUER = "https://id.example.com/realms/pi"
+$env:PI_OIDC_CLIENT_ID = "pi-enterprise"
+# Set only when the provider registered this as a confidential client.
+$env:PI_OIDC_CLIENT_SECRET = "replace-with-secret-from-idp"
 $env:PI_OIDC_AUDIENCE = "pi-enterprise"
 $env:PI_OIDC_ROLES_CLAIM = "roles"
+$env:PI_OIDC_ORGANIZATION_CLAIM = "org_id"
+$env:PI_OIDC_REDIRECT_URI = "http://localhost:30141/api/enterprise/v1/auth/callback"
 
 # Multiple allowed roots use the platform PATH separator (`;` on Windows).
 $env:PI_ENTERPRISE_WORKSPACE_ROOTS = "E:\projects;E:\customer-workspaces"
@@ -207,6 +215,14 @@ $env:PI_WORKER_DOCKER_IMAGE = "pi-enterprise-worker:local"
 docker build --build-arg NPM_REGISTRY=https://registry.npmmirror.com `
   -f Dockerfile.worker -t pi-enterprise-worker:local .
 ```
+
+Register `PI_OIDC_REDIRECT_URI` exactly at the identity provider. In production
+it must use HTTPS and the reverse proxy must preserve the public scheme and
+host seen by Next.js. The callback origin is also the trusted post-login
+redirect origin; arbitrary `returnTo` URLs and protocol-relative paths are
+replaced with `/`. The OIDC session cookie is HttpOnly, `SameSite=Lax`, Secure
+in production, and expires with the server-side session (eight hours by
+default). Logout revokes the PostgreSQL row before clearing the cookie.
 
 Conversation creation rejects missing paths and paths outside
 `PI_ENTERPRISE_WORKSPACE_ROOTS`. Docker workers mount the selected workspace at

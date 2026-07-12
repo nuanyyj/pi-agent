@@ -5,6 +5,7 @@ import { authenticateRequest } from "@/lib/enterprise/auth";
 import { requirePermission } from "@/lib/enterprise/rbac";
 import { checkRateLimit, getClientKey } from "@/lib/enterprise/rate-limit";
 import { resolveOrganizationAccess } from "@/lib/enterprise/request-access";
+import { revokeAuthSessionsForUser } from "@/lib/enterprise/auth-session";
 
 /**
  * GET /api/enterprise/v1/users
@@ -101,16 +102,19 @@ export async function POST(req: Request) {
     const db = await getEnterpriseDb();
     if (!db) return NextResponse.json({ error: "Database not available" }, { status: 503 });
 
-    await db.query(
-      `INSERT INTO enterprise_users (id, organization_id, email, display_name, roles, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, now(), now())
-       ON CONFLICT (id, organization_id) DO UPDATE SET
-         email = COALESCE(EXCLUDED.email, enterprise_users.email),
-         display_name = COALESCE(EXCLUDED.display_name, enterprise_users.display_name),
-         roles = EXCLUDED.roles,
-         updated_at = now()`,
-      [body.id, organizationId, body.email ?? null, body.displayName ?? null, roles],
-    );
+    await db.transaction(async (tx) => {
+      await tx.query(
+        `INSERT INTO enterprise_users (id, organization_id, email, display_name, roles, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, now(), now())
+         ON CONFLICT (id, organization_id) DO UPDATE SET
+           email = COALESCE(EXCLUDED.email, enterprise_users.email),
+           display_name = COALESCE(EXCLUDED.display_name, enterprise_users.display_name),
+           roles = EXCLUDED.roles,
+           updated_at = now()`,
+        [body.id, organizationId, body.email ?? null, body.displayName ?? null, roles],
+      );
+      await revokeAuthSessionsForUser(tx, body.id, organizationId);
+    });
 
     return NextResponse.json({ id: body.id, organizationId, roles }, { status: 201 });
   } catch (error) {

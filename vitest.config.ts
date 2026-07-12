@@ -4,6 +4,7 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   resolve: {
     alias: {
+      "@": resolve("."),
       "@pi-web/enterprise-protocol": resolve("packages/enterprise-protocol/src/index.ts"),
     },
   },

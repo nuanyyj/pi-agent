@@ -2,7 +2,7 @@
  * Enterprise authentication middleware.
  *
  * Supports pluggable auth modes via PI_AUTH_MODE env:
- *   - "token" (default): simple bearer token check against PI_AUTH_TOKEN
+ *   - "token": simple bearer token check against PI_AUTH_TOKEN
  *   - "oidc": OIDC/SSO token validation (requires PI_OIDC_ISSUER, PI_OIDC_AUDIENCE)
  *
  * All enterprise API routes should call `authenticateRequest()` before processing.
@@ -42,6 +42,7 @@ const STATIC_TOKEN = process.env.PI_AUTH_TOKEN ?? "";
 const OIDC_ISSUER = process.env.PI_OIDC_ISSUER ?? "";
 const OIDC_AUDIENCE = process.env.PI_OIDC_AUDIENCE ?? "";
 const OIDC_ROLES_CLAIM = process.env.PI_OIDC_ROLES_CLAIM ?? "roles";
+const OIDC_ORGANIZATION_CLAIM = process.env.PI_OIDC_ORGANIZATION_CLAIM ?? "org_id";
 
 // ── Token auth ─────────────────────────────────────────────────────────
 
@@ -147,13 +148,15 @@ async function authenticateOidc(authHeader: string | null): Promise<AuthResponse
 
     const { payload } = await jwtVerify<OidcClaims>(token, jwks, verifyOptions);
 
-    const user: AuthenticatedUser = {
-      id: payload.sub ?? "unknown",
-      email: payload.email,
-      name: payload.name ?? payload.preferred_username,
-      organizationId: payload.org_id ?? payload.organization,
-      roles: Array.isArray(payload[OIDC_ROLES_CLAIM]) ? (payload[OIDC_ROLES_CLAIM] as string[]) : undefined,
-    };
+    const { mapOidcClaims } = await import("./oidc");
+    const user = mapOidcClaims(payload, {
+      issuer: OIDC_ISSUER,
+      clientId: OIDC_AUDIENCE || "direct-api-client",
+      ...(OIDC_AUDIENCE ? { audience: OIDC_AUDIENCE } : {}),
+      redirectUri: "https://unused.invalid/callback",
+      rolesClaim: OIDC_ROLES_CLAIM,
+      organizationClaim: OIDC_ORGANIZATION_CLAIM,
+    });
 
     return { ok: true, user };
   } catch (err) {
@@ -176,18 +179,36 @@ async function authenticateOidc(authHeader: string | null): Promise<AuthResponse
  * ```
  */
 export async function authenticateRequest(req: Request): Promise<AuthResponse> {
-  const authHeader = req.headers.get("authorization") ?? getCookieAuthorization(req);
-
-  switch (AUTH_MODE) {
-    case "oidc":
-      return authenticateOidc(authHeader);
-    case "token":
-    default:
-      return authenticateToken(authHeader);
+  const authHeader = req.headers.get("authorization");
+  if (authHeader) {
+    return AUTH_MODE === "oidc"
+      ? authenticateOidc(authHeader)
+      : authenticateToken(authHeader);
   }
+
+  const cookieToken = getSessionCookie(req);
+  if (AUTH_MODE === "oidc") {
+    if (!cookieToken) return { ok: false, status: 401, error: "Authentication required" };
+    try {
+      const [{ getEnterpriseDb }, { findAuthSession }] = await Promise.all([
+        import("./db"),
+        import("./auth-session"),
+      ]);
+      const db = await getEnterpriseDb();
+      if (!db) return { ok: false, status: 503, error: "Enterprise database not available" };
+      const user = await findAuthSession(db, cookieToken);
+      return user
+        ? { ok: true, user }
+        : { ok: false, status: 401, error: "Invalid or expired session" };
+    } catch {
+      return { ok: false, status: 503, error: "Authentication service unavailable" };
+    }
+  }
+
+  return authenticateToken(cookieToken ? `Bearer ${cookieToken}` : null);
 }
 
-function getCookieAuthorization(req: Request): string | null {
+export function getSessionCookie(req: Request): string | null {
   const cookieHeader = req.headers.get("cookie");
   if (!cookieHeader) return null;
   for (const item of cookieHeader.split(";")) {
@@ -198,7 +219,7 @@ function getCookieAuthorization(req: Request): string | null {
     const value = item.slice(separator + 1).trim();
     if (!value) return null;
     try {
-      return `Bearer ${decodeURIComponent(value)}`;
+      return decodeURIComponent(value);
     } catch {
       return null;
     }

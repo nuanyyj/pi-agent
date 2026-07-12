@@ -202,5 +202,49 @@ async function ensureSchema(client) {
     create index if not exists enterprise_agents_org_idx
       on enterprise_agents(organization_id, is_active)
   `);
+    // Revocable browser sessions. Only a SHA-256 digest of the opaque cookie is
+    // stored so a database read cannot be used directly as an authenticated session.
+    await client.query(`
+    create table if not exists enterprise_auth_sessions (
+      id uuid primary key,
+      token_hash text not null unique,
+      user_id text not null,
+      email text null,
+      display_name text null,
+      organization_id text not null,
+      roles jsonb not null default '[]'::jsonb,
+      created_at timestamptz not null default now(),
+      expires_at timestamptz not null,
+      last_seen_at timestamptz not null default now(),
+      revoked_at timestamptz null
+    )
+  `);
+    await client.query(`
+    create index if not exists enterprise_auth_sessions_user_idx
+      on enterprise_auth_sessions(user_id, organization_id, expires_at desc)
+  `);
+    await client.query(`
+    create index if not exists enterprise_auth_sessions_expiry_idx
+      on enterprise_auth_sessions(expires_at)
+      where revoked_at is null
+  `);
+    // OIDC Authorization Code + PKCE transactions. State is stored only as a
+    // digest and each row is consumed atomically before a token exchange.
+    await client.query(`
+    create table if not exists enterprise_oidc_login_flows (
+      state_hash text primary key,
+      code_verifier text not null,
+      nonce text not null,
+      return_to text not null default '/',
+      created_at timestamptz not null default now(),
+      expires_at timestamptz not null,
+      consumed_at timestamptz null
+    )
+  `);
+    await client.query(`
+    create index if not exists enterprise_oidc_login_flows_expiry_idx
+      on enterprise_oidc_login_flows(expires_at)
+      where consumed_at is null
+  `);
 }
 //# sourceMappingURL=db.js.map

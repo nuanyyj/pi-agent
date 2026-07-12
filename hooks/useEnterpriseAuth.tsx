@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, createContext, useContext, type ReactNode } from "react";
+import { buildEnterpriseLoginUrl } from "@/lib/enterprise-login-url";
 
 interface AuthState {
   mode: string;
@@ -12,7 +13,7 @@ interface AuthState {
 
 interface AuthContextValue extends AuthState {
   setToken: (token: string) => void;
-  logout: () => void;
+  logout: () => Promise<void>;
   fetchWithAuth: (url: string, init?: RequestInit) => Promise<Response>;
 }
 
@@ -83,8 +84,10 @@ export function EnterpriseAuthProvider({ children }: { children: ReactNode }) {
     }).finally(() => setLoading(false));
   }, []);
 
-  const logout = useCallback(() => {
-    fetch("/api/enterprise/v1/auth", { method: "DELETE" }).catch(() => {});
+  const logout = useCallback(async () => {
+    try {
+      await fetch("/api/enterprise/v1/auth", { method: "DELETE" });
+    } finally {
     setState({
       mode: "token",
       disabled: true,
@@ -92,6 +95,7 @@ export function EnterpriseAuthProvider({ children }: { children: ReactNode }) {
       token: null,
       error: null,
     });
+    }
   }, []);
 
   const fetchWithAuth = useCallback(async (url: string, init?: RequestInit): Promise<Response> => {
@@ -138,6 +142,16 @@ export function useEnterpriseAuth(): AuthContextValue {
 
 function EnterpriseLoginForm({ mode, error, onSubmit }: { mode: string; error: string | null; onSubmit: (token: string) => void }) {
   const [token, setToken] = useState("");
+  const [callbackFailed, setCallbackFailed] = useState(false);
+  useEffect(() => {
+    setCallbackFailed(new URLSearchParams(window.location.search).has("authError"));
+  }, []);
+  const displayError = error || (callbackFailed ? "SSO sign-in failed. Please try again or contact your administrator." : null);
+
+  const startOidcLogin = () => {
+    const returnTo = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    window.location.assign(buildEnterpriseLoginUrl(returnTo));
+  };
 
   return (
     <div style={{
@@ -162,17 +176,29 @@ function EnterpriseLoginForm({ mode, error, onSubmit }: { mode: string; error: s
           </div>
         </div>
 
-        {error && (
+        {displayError && (
           <div style={{
             padding: "8px 12px", marginBottom: 16,
             background: "rgba(239,68,68,0.06)", border: "1px solid rgba(239,68,68,0.2)",
             borderRadius: 6, fontSize: 12, color: "#f87171",
           }}>
-            {error}
+            {displayError}
           </div>
         )}
 
-        <form onSubmit={(e) => { e.preventDefault(); onSubmit(token); }}>
+        {mode === "oidc" ? (
+          <button
+            type="button"
+            onClick={startOidcLogin}
+            style={{
+              width: "100%", height: 40, fontSize: 13, fontWeight: 600,
+              background: "var(--accent)", color: "#fff", border: "none",
+              borderRadius: 6, cursor: "pointer",
+            }}
+          >
+            Sign in with SSO
+          </button>
+        ) : <form onSubmit={(e) => { e.preventDefault(); onSubmit(token); }}>
           <label style={{ display: "block", fontSize: 12, color: "var(--text-muted)", marginBottom: 6 }}>
             {mode === "oidc" ? "Access Token" : "API Token"}
           </label>
@@ -202,7 +228,7 @@ function EnterpriseLoginForm({ mode, error, onSubmit }: { mode: string; error: s
           >
             Authenticate
           </button>
-        </form>
+        </form>}
       </div>
     </div>
   );
