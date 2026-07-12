@@ -21,7 +21,7 @@ interface MappedMessages {
 export function mapEventsToMessages(events: EnterpriseRunEvent[]): MappedMessages {
   const messages: AgentMessage[] = [];
   const toolResults = new Map<string, ToolResultMessage>();
-  let pendingToolCalls: Map<string, { name: string; input: Record<string, unknown> }> = new Map();
+  const pendingToolCalls: Map<string, { name: string; input: Record<string, unknown> }> = new Map();
 
   for (const event of events) {
     const data = event.data as Record<string, unknown>;

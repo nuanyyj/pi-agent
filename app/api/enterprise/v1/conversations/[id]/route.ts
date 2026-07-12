@@ -6,6 +6,7 @@ import { checkRateLimit, getClientKey } from "@/lib/enterprise/rate-limit";
 import { writeAuditEvent } from "@/lib/enterprise/audit-log";
 import { authenticateRequest } from "@/lib/enterprise/auth";
 import { requirePermission } from "@/lib/enterprise/rbac";
+import { resolveOrganizationAccess } from "@/lib/enterprise/request-access";
 
 /**
  * GET /api/enterprise/v1/conversations/[id]
@@ -19,11 +20,17 @@ export async function GET(
   if (!isEnterpriseEnabled()) {
     return NextResponse.json({ error: "Enterprise mode not enabled" }, { status: 503 });
   }
+  const auth = await authenticateRequest(req);
+  if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
+  const permission = requirePermission(auth.user, "conversation:read");
+  if (!permission.ok) return NextResponse.json({ error: permission.error }, { status: permission.status });
 
   try {
     const { id } = await params;
     const url = new URL(req.url);
-    const organizationId = url.searchParams.get("organizationId") ?? "default";
+    const access = resolveOrganizationAccess(auth.user, url.searchParams.get("organizationId"));
+    if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status });
+    const organizationId = access.organizationId;
 
     const db = await getEnterpriseDb();
     if (!db) {
@@ -74,7 +81,9 @@ export async function DELETE(
   try {
     const { id } = await params;
     const url = new URL(req.url);
-    const organizationId = url.searchParams.get("organizationId") ?? "default";
+    const access = resolveOrganizationAccess(auth.user, url.searchParams.get("organizationId"));
+    if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status });
+    const organizationId = access.organizationId;
 
     const db = await getEnterpriseDb();
     if (!db) {
@@ -96,6 +105,7 @@ export async function DELETE(
     // Audit log
     writeAuditEvent(db, {
       organizationId,
+      actorId: auth.user.id,
       action: "conversation.deleted",
       resourceType: "conversation",
       resourceId: id,

@@ -4,7 +4,10 @@ import { getEnterpriseDb, isEnterpriseEnabled } from "@/lib/enterprise/db";
 import { getRunRepository } from "@/lib/enterprise/run-repo";
 import { writeAuditEvent } from "@/lib/enterprise/audit-log";
 import { checkRateLimit, getClientKey } from "@/lib/enterprise/rate-limit";
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
+import { authenticateRequest } from "@/lib/enterprise/auth";
+import { requirePermission } from "@/lib/enterprise/rbac";
+import { hasOrganizationAccess } from "@/lib/enterprise/request-access";
 
 /**
  * POST /api/enterprise/v1/runs/[id]/cancel
@@ -21,6 +24,10 @@ export async function POST(
   if (!isEnterpriseEnabled()) {
     return NextResponse.json({ error: "Enterprise mode not enabled" }, { status: 503 });
   }
+  const auth = await authenticateRequest(req);
+  if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
+  const permission = requirePermission(auth.user, "run:cancel");
+  if (!permission.ok) return NextResponse.json({ error: permission.error }, { status: permission.status });
 
   try {
     const { id } = await params;
@@ -29,6 +36,9 @@ export async function POST(
 
     if (!run) {
       return NextResponse.json({ error: "Run not found" }, { status: 404 });
+    }
+    if (!hasOrganizationAccess(auth.user, run.organizationId)) {
+      return NextResponse.json({ error: "Organization access denied" }, { status: 403 });
     }
 
     if (run.status !== "pending" && run.status !== "running") {
@@ -43,13 +53,15 @@ export async function POST(
     // Kill Docker container if in docker mode
     if (process.env.PI_WORKER_MODE === "docker") {
       try {
-        const containers = execSync(
-          "docker ps -q --filter label=pi-run-id=" + id,
+        const containers = execFileSync(
+          "docker", ["ps", "-q", "--filter", `label=pi-run-id=${id}`],
           { encoding: "utf8", timeout: 5000 }
         ).trim();
         if (containers) {
           for (const cid of containers.split("\n")) {
-            execSync("docker kill " + cid, { timeout: 5000 });
+            if (/^[a-f0-9]+$/i.test(cid)) {
+              execFileSync("docker", ["kill", cid], { timeout: 5000 });
+            }
           }
         }
       } catch { /* container may already be stopped */ }
@@ -65,6 +77,7 @@ export async function POST(
     if (db) {
       writeAuditEvent(db, {
         organizationId: run.organizationId,
+        actorId: auth.user.id,
         action: "run.cancelled",
         resourceType: "run",
         resourceId: id,

@@ -3,6 +3,9 @@ import { sanitizeError } from "@/lib/api-errors";
 import { getEnterpriseDb, isEnterpriseEnabled } from "@/lib/enterprise/db";
 import { queryAuditEvents, type AuditAction, type AuditResourceType } from "@/lib/enterprise/audit-log";
 import { checkRateLimit, getClientKey } from "@/lib/enterprise/rate-limit";
+import { authenticateRequest } from "@/lib/enterprise/auth";
+import { requirePermission } from "@/lib/enterprise/rbac";
+import { resolveOrganizationAccess } from "@/lib/enterprise/request-access";
 
 /**
  * GET /api/enterprise/v1/audit
@@ -23,10 +26,16 @@ export async function GET(req: Request) {
   if (!isEnterpriseEnabled()) {
     return NextResponse.json({ error: "Enterprise mode not enabled" }, { status: 503 });
   }
+  const auth = await authenticateRequest(req);
+  if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
+  const permission = requirePermission(auth.user, "audit:read");
+  if (!permission.ok) return NextResponse.json({ error: permission.error }, { status: permission.status });
 
   try {
     const url = new URL(req.url);
-    const organizationId = url.searchParams.get("organizationId") ?? undefined;
+    const access = resolveOrganizationAccess(auth.user, url.searchParams.get("organizationId"));
+    if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status });
+    const organizationId = access.organizationId;
     const resourceType = url.searchParams.get("resourceType") as AuditResourceType | null;
     const resourceId = url.searchParams.get("resourceId") ?? undefined;
     const action = url.searchParams.get("action") as AuditAction | null;

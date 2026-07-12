@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { useEnterprise } from "@/hooks/useEnterprise";
+import { AgentsTab } from "./AgentsTab";
 
 type AdminTab = "users" | "agents" | "quotas";
 
@@ -451,4 +451,3 @@ function roleColor(role: string): { bg: string; fg: string } {
 function formatTime(iso: string): string {
   try { return new Date(iso).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }); } catch { return ""; }
 }
-import { AgentsTab } from "./AgentsTab";

@@ -64,21 +64,26 @@ function resolveModel(
 
 // ── PG event writer ────────────────────────────────────────────────────
 
-function createPgEventWriter(db: EnterpriseDatabase, runId: string) {
+export function createPgEventWriter(db: EnterpriseDatabase, runId: string) {
   let seq = 0;
+  let pendingWrites = Promise.resolve();
 
   return {
-    async writeEvent(type: string, data: unknown): Promise<void> {
-      seq++;
-      try {
+    writeEvent(type: string, data: unknown): void {
+      const eventSeq = ++seq;
+      pendingWrites = pendingWrites.then(async () => {
         await db.query(
           `insert into enterprise_run_events (run_id, seq, event_type, event_data) values ($1, $2, $3, $4)`,
-          [runId, seq, type, JSON.stringify(data)],
+          [runId, eventSeq, type, JSON.stringify(data)],
         );
-      } catch (err) {
+        await db.query("select pg_notify('enterprise_run_events', $1 || ':' || $2)", [runId, String(eventSeq)]);
+      }).catch((err) => {
         // Non-fatal: log but don't crash the run
         process.stderr.write(`[run-executor] Failed to write event ${type}: ${err}\n`);
-      }
+      });
+    },
+    async flush(): Promise<void> {
+      await pendingWrites;
     },
     async updateRunStatus(status: string, patch?: { response?: string; error?: string }): Promise<void> {
       try {
@@ -144,6 +149,7 @@ export async function executeRun(options: RunExecutorOptions): Promise<RunResult
       envelope,
       models,
       model,
+      ...(envelope.systemPrompt ? { systemPrompt: envelope.systemPrompt } : {}),
     });
 
     const { harness } = harnessResult;
@@ -184,6 +190,7 @@ export async function executeRun(options: RunExecutorOptions): Promise<RunResult
       throw err;
     } finally {
       unsubscribe();
+      await pgWriter?.flush();
     }
 
     // Mark completed

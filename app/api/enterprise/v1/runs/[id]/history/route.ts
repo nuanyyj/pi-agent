@@ -3,6 +3,8 @@ import { sanitizeError } from "@/lib/api-errors";
 import { isEnterpriseEnabled } from "@/lib/enterprise/db";
 import { getRunRepository } from "@/lib/enterprise/run-repo";
 import { authenticateRequest } from "@/lib/enterprise/auth";
+import { requirePermission } from "@/lib/enterprise/rbac";
+import { hasOrganizationAccess } from "@/lib/enterprise/request-access";
 
 /**
  * GET /api/enterprise/v1/runs/[id]/history
@@ -20,6 +22,8 @@ export async function GET(
   if (!auth.ok) {
     return NextResponse.json({ error: auth.error }, { status: auth.status });
   }
+  const permission = requirePermission(auth.user, "run:read");
+  if (!permission.ok) return NextResponse.json({ error: permission.error }, { status: permission.status });
 
   try {
     const { id } = await params;
@@ -28,6 +32,9 @@ export async function GET(
 
     if (!run) {
       return NextResponse.json({ error: "Run not found" }, { status: 404 });
+    }
+    if (!hasOrganizationAccess(auth.user, run.organizationId)) {
+      return NextResponse.json({ error: "Organization access denied" }, { status: 403 });
     }
 
     // Fetch all events from seq 0
@@ -39,6 +46,8 @@ export async function GET(
         status: run.status,
         modelProvider: run.modelProvider,
         modelId: run.modelId,
+        agentId: run.agentId,
+        agentName: run.agentName,
         userInput: run.userInput,
         response: run.response,
         error: run.error,

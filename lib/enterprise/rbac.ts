@@ -54,7 +54,10 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
 
 export function hasPermission(user: AuthenticatedUser, permission: Permission): boolean {
   const roles = user.roles ?? [];
-  if (roles.length === 0) return true; // No roles = unrestricted (dev mode)
+  // Only the explicit no-auth development identity bypasses RBAC. Missing
+  // OIDC/token roles must fail closed instead of silently becoming admin.
+  if (user.id === "dev-user") return true;
+  if (roles.length === 0) return false;
 
   return roles.some((role) => {
     const perms = ROLE_PERMISSIONS[role as Role];
@@ -80,6 +83,7 @@ export function getAllRoles(): Role[] {
  * Hierarchy: admin > developer > viewer
  */
 export function hasMinRole(user: AuthenticatedUser, minRole: Role): boolean {
+  if (user.id === "dev-user") return true;
   const roleLevel: Record<Role, number> = { admin: 3, developer: 2, viewer: 1 };
   const userLevel = Math.max(...(user.roles ?? []).map((r) => roleLevel[r as Role] ?? 0));
   return userLevel >= roleLevel[minRole];

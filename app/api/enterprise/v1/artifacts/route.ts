@@ -3,6 +3,9 @@ import { sanitizeError } from "@/lib/api-errors";
 import { isEnterpriseEnabled } from "@/lib/enterprise/db";
 import { isArtifactStorageEnabled, downloadArtifact, artifactExists } from "@/lib/enterprise/artifacts";
 import { checkRateLimit, getClientKey } from "@/lib/enterprise/rate-limit";
+import { authenticateRequest } from "@/lib/enterprise/auth";
+import { requirePermission } from "@/lib/enterprise/rbac";
+import { resolveOrganizationAccess } from "@/lib/enterprise/request-access";
 
 /**
  * GET /api/enterprise/v1/artifacts?key=<url-encoded-key>
@@ -20,6 +23,10 @@ export async function GET(req: Request) {
   if (!isArtifactStorageEnabled()) {
     return NextResponse.json({ error: "Artifact storage not configured" }, { status: 503 });
   }
+  const auth = await authenticateRequest(req);
+  if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
+  const permission = requirePermission(auth.user, "artifact:read");
+  if (!permission.ok) return NextResponse.json({ error: permission.error }, { status: permission.status });
 
   try {
     const url = new URL(req.url);
@@ -33,6 +40,8 @@ export async function GET(req: Request) {
     if (parts.length < 3 || key.includes("..")) {
       return NextResponse.json({ error: "Invalid key" }, { status: 400 });
     }
+    const access = resolveOrganizationAccess(auth.user, parts[0]);
+    if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status });
 
     const exists = await artifactExists(key);
     if (!exists) {

@@ -4,6 +4,7 @@ import { getEnterpriseDb, isEnterpriseEnabled } from "@/lib/enterprise/db";
 import { authenticateRequest } from "@/lib/enterprise/auth";
 import { requirePermission } from "@/lib/enterprise/rbac";
 import { checkRateLimit, getClientKey } from "@/lib/enterprise/rate-limit";
+import { resolveOrganizationAccess } from "@/lib/enterprise/request-access";
 
 /**
  * GET /api/enterprise/v1/users
@@ -22,7 +23,9 @@ export async function GET(req: Request) {
 
   try {
     const url = new URL(req.url);
-    const organizationId = url.searchParams.get("organizationId") ?? "default";
+    const access = resolveOrganizationAccess(auth.user, url.searchParams.get("organizationId"));
+    if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status });
+    const organizationId = access.organizationId;
 
     const db = await getEnterpriseDb();
     if (!db) return NextResponse.json({ error: "Database not available" }, { status: 503 });
@@ -82,7 +85,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "id is required" }, { status: 400 });
     }
 
-    const organizationId = body.organizationId ?? "default";
+    const access = resolveOrganizationAccess(auth.user, body.organizationId);
+    if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status });
+    const organizationId = access.organizationId;
     const roles = body.roles ?? ["viewer"];
 
     // Validate roles

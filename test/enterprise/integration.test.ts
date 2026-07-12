@@ -16,6 +16,7 @@ import { createPgRunRepository, type RunRepository, type RunRecord } from "../..
 import { checkQuota, recordUsage, getUsageSummary } from "../../lib/enterprise/quota";
 import { writeAuditEvent, queryAuditEvents } from "../../lib/enterprise/audit-log";
 import { sanitizeString } from "../../lib/enterprise/sanitizer";
+import { resolveExecutionSnapshot } from "../../lib/enterprise/agent-runtime";
 
 const PG_URL =
   process.env.PI_POSTGRES_URL ??
@@ -39,6 +40,7 @@ afterAll(async () => {
     await db.query("DELETE FROM enterprise_runs WHERE organization_id = $1", [orgId]);
     await db.query("DELETE FROM enterprise_audit_events WHERE organization_id = $1", [orgId]);
     await db.query("DELETE FROM enterprise_usage WHERE organization_id = $1", [orgId]);
+    await db.query("DELETE FROM enterprise_agents WHERE organization_id = $1", [orgId]);
     await db.query("DELETE FROM enterprise_sessions WHERE organization_id = $1", [orgId]);
   } catch { /* best effort */ }
   await db?.close();
@@ -178,6 +180,53 @@ describe("enterprise integration", () => {
 
     const gone = await repo.getRun(run.id);
     expect(gone).toBeNull();
+  });
+
+  it("persists an immutable agent execution snapshot on the run", async () => {
+    const agentId = `agent-${randomUUID().slice(0, 8)}`;
+    await db.query(
+      `insert into enterprise_agents
+         (id, organization_id, name, system_prompt, default_model_provider,
+          default_model_id, default_tools)
+       values ($1, $2, $3, $4, $5, $6, $7)`,
+      [agentId, orgId, "Snapshot Agent", "original prompt", "openai", "gpt-4o", JSON.stringify(["read", "grep"])],
+    );
+    const snapshot = await resolveExecutionSnapshot(db, {
+      organizationId: orgId,
+      agentId,
+    });
+    const session = await broker.createSession({
+      organizationId: orgId,
+      workspaceRoot: "/workspace/snapshot-test",
+    });
+    const run = {
+      ...makeRunRecord(session.metadata.id),
+      agentId,
+      agentName: snapshot.agentName,
+      modelProvider: snapshot.modelProvider,
+      modelId: snapshot.modelId,
+    };
+    await repo.createRun(run, snapshot);
+
+    await db.query(
+      `update enterprise_agents
+       set name = 'Changed Agent', system_prompt = 'changed prompt', default_model_id = 'changed-model'
+       where id = $1 and organization_id = $2`,
+      [agentId, orgId],
+    );
+
+    expect(await repo.getRunExecutionSnapshot(run.id)).toMatchObject({
+      agentId,
+      agentName: "Snapshot Agent",
+      systemPrompt: "original prompt",
+      modelId: "gpt-4o",
+      toolNames: ["read", "grep"],
+    });
+    expect(await repo.getRun(run.id)).toMatchObject({
+      agentId,
+      agentName: "Snapshot Agent",
+      modelId: "gpt-4o",
+    });
   });
 
   it("sanitizer: prevents credential leakage in events", async () => {

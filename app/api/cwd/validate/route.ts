@@ -1,13 +1,10 @@
 import { NextResponse } from "next/server";
 import { sanitizeError } from "@/lib/api-errors";
 import { statSync, type Stats } from "fs";
-import { homedir } from "os";
 import { isAbsolute, resolve } from "path";
 import { allowFileRoot } from "@/lib/file-access";
 
 function normalizeCwd(cwd: string): string {
-  if (cwd === "~") return homedir();
-  if (cwd.startsWith("~/")) return resolve(homedir(), cwd.slice(2));
   return isAbsolute(cwd) ? cwd : resolve(cwd);
 }
 
@@ -20,6 +17,9 @@ export async function POST(req: Request) {
 
     if (!cwd) {
       return NextResponse.json({ error: "Path is required" }, { status: 400 });
+    }
+    if (cwd === "~" || cwd.startsWith("~/")) {
+      return NextResponse.json({ error: "Home-relative paths must be expanded by the client" }, { status: 400 });
     }
 
     const normalizedCwd = normalizeCwd(cwd);

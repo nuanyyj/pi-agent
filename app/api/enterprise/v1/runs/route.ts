@@ -1,18 +1,29 @@
 import { NextResponse } from "next/server";
 import { sanitizeError } from "@/lib/api-errors";
-import { isEnterpriseEnabled } from "@/lib/enterprise/db";
+import { getEnterpriseDb, isEnterpriseEnabled } from "@/lib/enterprise/db";
 import { getRunRepository, type RunRecord } from "@/lib/enterprise/run-repo";
 import { checkRateLimit, getClientKey } from "@/lib/enterprise/rate-limit";
 import { authenticateRequest } from "@/lib/enterprise/auth";
 import { checkQuota, recordUsage } from "@/lib/enterprise/quota";
 import { requirePermission } from "@/lib/enterprise/rbac";
 import { writeAuditEvent } from "@/lib/enterprise/audit-log";
-import { getEnterpriseDb } from "@/lib/enterprise/db";
+import {
+  AgentRuntimeError,
+  resolveExecutionSnapshot,
+  type AgentExecutionSnapshot,
+} from "@/lib/enterprise/agent-runtime";
+import { resolveOrganizationAccess } from "@/lib/enterprise/request-access";
+import {
+  resolveEnterpriseWorkspaceRoot,
+  WorkspacePolicyError,
+} from "@/lib/enterprise/workspace-policy";
+import { buildDockerWorkerLaunch } from "@/lib/enterprise/docker-worker";
+import { canWorkerFinalizeRun } from "@/lib/enterprise/run-lifecycle";
 import { randomUUID } from "node:crypto";
-import { writeFile, mkdtemp } from "node:fs/promises";
+import { writeFile, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { spawn, execSync } from "node:child_process";
+import { spawn, execFileSync } from "node:child_process";
 
 /**
  * POST /api/enterprise/v1/runs
@@ -42,28 +53,53 @@ export async function POST(req: Request) {
     const body = (await req.json()) as {
       conversationId: string;
       organizationId?: string;
-      workspaceRoot?: string;
-      modelProvider: string;
-      modelId: string;
+      agentId?: string;
+      modelProvider?: string;
+      modelId?: string;
       userInput: string;
       systemPrompt?: string;
       toolNames?: string[];
     };
 
-    if (!body.conversationId || !body.modelProvider || !body.modelId || !body.userInput) {
+    if (!body.conversationId || !body.userInput?.trim()) {
       return NextResponse.json(
-        { error: "conversationId, modelProvider, modelId, and userInput are required" },
+        { error: "conversationId and userInput are required" },
         { status: 400 },
       );
     }
 
+    const access = resolveOrganizationAccess(auth.user, body.organizationId);
+    if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status });
+    const organizationId = access.organizationId;
+
+    const db = await getEnterpriseDb();
+    if (!db) {
+      return NextResponse.json({ error: "Database not available" }, { status: 503 });
+    }
+    const conversationResult = await db.query<{ workspace_root: string }>(
+      `select workspace_root from enterprise_sessions
+       where id = $1 and organization_id = $2 and deleted_at is null`,
+      [body.conversationId, organizationId],
+    );
+    const conversation = conversationResult.rows[0];
+    if (!conversation) {
+      return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
+    }
+    const workspaceRoot = await resolveEnterpriseWorkspaceRoot(conversation.workspace_root);
+
+    const execution = await resolveExecutionSnapshot(db, {
+      organizationId,
+      agentId: body.agentId,
+      modelProvider: body.modelProvider,
+      modelId: body.modelId,
+      toolNames: body.toolNames,
+      systemPrompt: body.systemPrompt,
+    });
+
     // Quota check
-    const db = await getEnterpriseDb().catch(() => null);
-    if (db) {
-      const quotaCheck = await checkQuota(db, body.organizationId ?? "default");
-      if (!quotaCheck.allowed) {
-        return NextResponse.json({ error: quotaCheck.reason }, { status: 429 });
-      }
+    const quotaCheck = await checkQuota(db, organizationId);
+    if (!quotaCheck.allowed) {
+      return NextResponse.json({ error: quotaCheck.reason }, { status: 429 });
     }
 
     const repo = await getRunRepository();
@@ -73,45 +109,54 @@ export async function POST(req: Request) {
     const record: RunRecord = {
       id: runId,
       conversationId: body.conversationId,
-      organizationId: body.organizationId ?? "default",
+      organizationId,
       status: "pending",
-      modelProvider: body.modelProvider,
-      modelId: body.modelId,
-      userInput: body.userInput,
+      modelProvider: execution.modelProvider,
+      modelId: execution.modelId,
+      agentId: execution.agentId,
+      agentName: execution.agentName,
+      userInput: body.userInput.trim(),
       eventCount: 0,
       createdAt: now,
     };
 
-    await repo.createRun(record);
+    await repo.createRun(record, execution);
 
     // Record usage — fire-and-forget
-    if (db) {
-      recordUsage(db, {
-        organizationId: record.organizationId,
-        userId: auth.user.id,
-        runId,
-        tokensIn: 0,
-        tokensOut: 0,
-        modelProvider: body.modelProvider,
-        modelId: body.modelId,
-      }).catch(() => {});
-    }
+    recordUsage(db, {
+      organizationId: record.organizationId,
+      userId: auth.user.id,
+      runId,
+      tokensIn: 0,
+      tokensOut: 0,
+      modelProvider: execution.modelProvider,
+      modelId: execution.modelId,
+    }).catch(() => {});
 
     // Audit log — fire-and-forget
-    const auditDb = await getEnterpriseDb().catch(() => null);
-    if (auditDb) {
-      writeAuditEvent(auditDb, {
-        organizationId: record.organizationId,
-        action: "run.created",
-        resourceType: "run",
-        resourceId: runId,
-        details: { conversationId: body.conversationId, modelProvider: body.modelProvider, modelId: body.modelId },
-        ipAddress: getClientKey(req),
-      }).catch(() => {});
-    }
+    writeAuditEvent(db, {
+      organizationId: record.organizationId,
+      actorId: auth.user.id,
+      action: "run.created",
+      resourceType: "run",
+      resourceId: runId,
+      details: {
+        conversationId: body.conversationId,
+        agentId: execution.agentId,
+        agentName: execution.agentName,
+        modelProvider: execution.modelProvider,
+        modelId: execution.modelId,
+      },
+      ipAddress: getClientKey(req),
+    }).catch(() => {});
 
     // Spawn worker process asynchronously
-    spawnWorker(record, body, repo).catch((err) => {
+    spawnWorker(record, {
+      conversationId: body.conversationId,
+      workspaceRoot,
+      userInput: record.userInput,
+      execution,
+    }, repo).catch((err) => {
       console.error("[enterprise-run] worker spawn failed:", err);
       repo.updateRun(runId, {
         status: "failed",
@@ -126,9 +171,17 @@ export async function POST(req: Request) {
       status: record.status,
       modelProvider: record.modelProvider,
       modelId: record.modelId,
+      agentId: record.agentId,
+      agentName: record.agentName,
       createdAt: record.createdAt,
     }, { status: 201 });
   } catch (error) {
+    if (error instanceof AgentRuntimeError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+    if (error instanceof WorkspacePolicyError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     return NextResponse.json({ error: sanitizeError(error) }, { status: 500 });
   }
 }
@@ -142,10 +195,17 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Enterprise mode not enabled" }, { status: 503 });
   }
 
+  const auth = await authenticateRequest(req);
+  if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
+  const perm = requirePermission(auth.user, "run:read");
+  if (!perm.ok) return NextResponse.json({ error: perm.error }, { status: perm.status });
+
   try {
     const url = new URL(req.url);
     const conversationId = url.searchParams.get("conversationId") ?? undefined;
-    const organizationId = url.searchParams.get("organizationId") ?? undefined;
+    const access = resolveOrganizationAccess(auth.user, url.searchParams.get("organizationId"));
+    if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status });
+    const organizationId = access.organizationId;
 
     const repo = await getRunRepository();
     const runs = await repo.listRuns({ conversationId, organizationId });
@@ -160,18 +220,27 @@ export async function GET(req: Request) {
 
 interface RunBody {
   conversationId: string;
-  organizationId?: string;
-  workspaceRoot?: string;
-  modelProvider: string;
-  modelId: string;
+  workspaceRoot: string;
   userInput: string;
-  systemPrompt?: string;
-  toolNames?: string[];
+  execution: AgentExecutionSnapshot;
 }
 
 async function spawnWorker(record: RunRecord, body: RunBody, repo: Awaited<ReturnType<typeof getRunRepository>>): Promise<void> {
   const tmpDir = await mkdtemp(join(tmpdir(), "pi-run-"));
   const envelopePath = join(tmpDir, "envelope.json");
+
+  const workerMode = process.env.PI_WORKER_MODE ?? "local";
+  const dockerImage = process.env.PI_WORKER_DOCKER_IMAGE ?? "pi-enterprise-worker";
+  const dockerLaunch = workerMode === "docker"
+    ? buildDockerWorkerLaunch({
+        image: dockerImage,
+        runId: record.id,
+        envelopePath,
+        workspaceRoot: body.workspaceRoot,
+        postgresUrl: process.env.PI_POSTGRES_URL ?? "",
+        providerEnvironment: process.env,
+      })
+    : null;
 
   const envelope = {
     protocolVersion: 1,
@@ -180,48 +249,29 @@ async function spawnWorker(record: RunRecord, body: RunBody, repo: Awaited<Retur
     conversationId: body.conversationId,
     runId: record.id,
     attempt: 1,
-    workspaceRoot: body.workspaceRoot ?? process.cwd(),
-    toolNames: body.toolNames ?? ["read", "bash", "edit", "write"],
-    modelProvider: body.modelProvider,
-    modelId: body.modelId,
+    workspaceRoot: dockerLaunch?.envelopeWorkspaceRoot ?? body.workspaceRoot,
+    toolNames: body.execution.toolNames,
+    modelProvider: body.execution.modelProvider,
+    modelId: body.execution.modelId,
     userInput: body.userInput,
-    ...(body.systemPrompt ? { systemPrompt: body.systemPrompt } : {}),
+    ...(body.execution.systemPrompt ? { systemPrompt: body.execution.systemPrompt } : {}),
   };
 
   await writeFile(envelopePath, JSON.stringify(envelope), "utf8");
 
   await repo.updateRun(record.id, { status: "running", startedAt: new Date().toISOString() });
 
-  const WORKER_MODE = process.env.PI_WORKER_MODE ?? "local";
-  const DOCKER_IMAGE = process.env.PI_WORKER_DOCKER_IMAGE ?? "pi-enterprise-worker";
-
   let child;
 
-  if (WORKER_MODE === "docker") {
+  if (dockerLaunch) {
     // Run worker in isolated Docker container
     try {
-      execSync(`docker image inspect ${DOCKER_IMAGE} --format "{{.Id}}"`, { stdio: "ignore" });
+      execFileSync("docker", ["image", "inspect", dockerImage, "--format", "{{.Id}}"], { stdio: "ignore" });
     } catch {
-      throw new Error(`Docker image ${DOCKER_IMAGE} not found. Build with: docker build -f Dockerfile.worker -t ${DOCKER_IMAGE} .`);
+      throw new Error(`Docker image ${dockerImage} not found. Build with: docker build -f Dockerfile.worker -t ${dockerImage} .`);
     }
 
-    const pgUrl = process.env.PI_POSTGRES_URL ?? "";
-    const dockerArgs = [
-      "run", "--rm",
-      "--network", "host", // Share host network for PG access
-      "--memory", "512m",
-      "--cpus", "1",
-      "--read-only",
-      "--label", "pi-run-id=" + record.id,
-      "--tmpfs", "/tmp:size=100m",
-      "-e", `PI_RUN_ENVELOPE_PATH=/tmp/envelope.json`,
-      "-e", `PI_RUN_ID=${record.id}`,
-      "-e", `PI_POSTGRES_URL=${pgUrl}`,
-      "-v", `${envelopePath}:/tmp/envelope.json:ro`,
-      DOCKER_IMAGE,
-    ];
-
-    child = spawn("docker", dockerArgs, {
+    child = spawn("docker", dockerLaunch.args, {
       stdio: ["ignore", "pipe", "pipe"],
     });
   } else {
@@ -237,11 +287,22 @@ async function spawnWorker(record: RunRecord, body: RunBody, repo: Awaited<Retur
 
   let stdout = "";
   let stderr = "";
+  let cleanedUp = false;
+  const cleanup = async () => {
+    if (cleanedUp) return;
+    cleanedUp = true;
+    await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  };
 
   child.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
   child.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
 
   child.on("close", async (code) => {
+    const current = await repo.getRun(record.id);
+    if (!current || !canWorkerFinalizeRun(current.status)) {
+      await cleanup();
+      return;
+    }
     if (code === 0) {
       try {
         const lines = stdout.trim().split("\n");
@@ -265,13 +326,18 @@ async function spawnWorker(record: RunRecord, body: RunBody, repo: Awaited<Retur
         completedAt: new Date().toISOString(),
       });
     }
+    await cleanup();
   });
 
   child.on("error", async (err) => {
-    await repo.updateRun(record.id, {
-      status: "failed",
-      error: err.message,
-      completedAt: new Date().toISOString(),
-    });
+    const current = await repo.getRun(record.id);
+    if (current && canWorkerFinalizeRun(current.status)) {
+      await repo.updateRun(record.id, {
+        status: "failed",
+        error: err.message,
+        completedAt: new Date().toISOString(),
+      });
+    }
+    await cleanup();
   });
 }

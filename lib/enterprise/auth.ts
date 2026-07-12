@@ -8,7 +8,7 @@
  * All enterprise API routes should call `authenticateRequest()` before processing.
  */
 
-import type { NextResponse } from "next/server";
+export const ENTERPRISE_AUTH_COOKIE = "pi_enterprise_session";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -66,32 +66,54 @@ async function authenticateToken(authHeader: string | null): Promise<AuthRespons
 
   // Load roles from PG if available
   let roles: string[] | undefined;
+  let organizationId: string | undefined;
   try {
     const { getEnterpriseDb } = await import("./db");
     const db = await getEnterpriseDb().catch(() => null);
     if (db) {
       const result = await db.query(
-        "SELECT roles FROM enterprise_users WHERE id = $1 LIMIT 1",
+        "SELECT organization_id, roles FROM enterprise_users WHERE id = $1 LIMIT 1",
         ["token-user"]
       ).catch(() => null);
-      if (result?.rows[0]) roles = result.rows[0].roles as string[];
+      if (result?.rows[0]) {
+        organizationId = result.rows[0].organization_id as string;
+        roles = result.rows[0].roles as string[];
+      }
     }
   } catch { /* ignore */ }
 
-  return { ok: true, user: { id: "token-user", roles } };
+  return { ok: true, user: { id: "token-user", organizationId, roles } };
 }
 
 // ── OIDC auth (with jose for full signature verification) ────────────
 
 import { createRemoteJWKSet, jwtVerify, type JWTPayload } from "jose";
 
-let _jwks: ReturnType<typeof createRemoteJWKSet> | null = null;
+let _jwksPromise: Promise<ReturnType<typeof createRemoteJWKSet>> | null = null;
 
-function getJwks(issuer: string) {
-  if (_jwks) return _jwks;
-  const jwksUrl = new URL(`${issuer}/.well-known/openid-configuration`);
-  _jwks = createRemoteJWKSet(jwksUrl);
-  return _jwks;
+async function getJwks(issuer: string): Promise<ReturnType<typeof createRemoteJWKSet>> {
+  if (_jwksPromise) return _jwksPromise;
+  _jwksPromise = (async () => {
+    const discoveryUrl = new URL(".well-known/openid-configuration", `${issuer.replace(/\/$/, "")}/`);
+    const response = await fetch(discoveryUrl, {
+      headers: { Accept: "application/json" },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!response.ok) {
+      throw new Error(`OIDC discovery failed with status ${response.status}`);
+    }
+    const metadata = await response.json() as { jwks_uri?: unknown };
+    if (typeof metadata.jwks_uri !== "string" || !metadata.jwks_uri) {
+      throw new Error("OIDC discovery response is missing jwks_uri");
+    }
+    return createRemoteJWKSet(new URL(metadata.jwks_uri));
+  })();
+  try {
+    return await _jwksPromise;
+  } catch (error) {
+    _jwksPromise = null;
+    throw error;
+  }
 }
 
 interface OidcClaims extends JWTPayload {
@@ -119,7 +141,7 @@ async function authenticateOidc(authHeader: string | null): Promise<AuthResponse
   }
 
   try {
-    const jwks = getJwks(OIDC_ISSUER);
+    const jwks = await getJwks(OIDC_ISSUER);
     const verifyOptions: Record<string, unknown> = { issuer: OIDC_ISSUER };
     if (OIDC_AUDIENCE) verifyOptions.audience = OIDC_AUDIENCE;
 
@@ -154,7 +176,7 @@ async function authenticateOidc(authHeader: string | null): Promise<AuthResponse
  * ```
  */
 export async function authenticateRequest(req: Request): Promise<AuthResponse> {
-  const authHeader = req.headers.get("authorization");
+  const authHeader = req.headers.get("authorization") ?? getCookieAuthorization(req);
 
   switch (AUTH_MODE) {
     case "oidc":
@@ -163,6 +185,25 @@ export async function authenticateRequest(req: Request): Promise<AuthResponse> {
     default:
       return authenticateToken(authHeader);
   }
+}
+
+function getCookieAuthorization(req: Request): string | null {
+  const cookieHeader = req.headers.get("cookie");
+  if (!cookieHeader) return null;
+  for (const item of cookieHeader.split(";")) {
+    const separator = item.indexOf("=");
+    if (separator < 0) continue;
+    const name = item.slice(0, separator).trim();
+    if (name !== ENTERPRISE_AUTH_COOKIE) continue;
+    const value = item.slice(separator + 1).trim();
+    if (!value) return null;
+    try {
+      return `Bearer ${decodeURIComponent(value)}`;
+    } catch {
+      return null;
+    }
+  }
+  return null;
 }
 
 /**

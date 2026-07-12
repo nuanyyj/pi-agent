@@ -8,13 +8,16 @@ import {
   uploadArtifact,
 } from "@/lib/enterprise/artifacts";
 import { checkRateLimit, getClientKey } from "@/lib/enterprise/rate-limit";
+import { authenticateRequest } from "@/lib/enterprise/auth";
+import { requirePermission } from "@/lib/enterprise/rbac";
+import { hasOrganizationAccess } from "@/lib/enterprise/request-access";
 
 /**
  * GET /api/enterprise/v1/runs/[id]/artifacts
  * List artifacts for a run.
  */
 export async function GET(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   if (!isEnterpriseEnabled()) {
@@ -23,6 +26,10 @@ export async function GET(
   if (!isArtifactStorageEnabled()) {
     return NextResponse.json({ error: "Artifact storage not configured" }, { status: 503 });
   }
+  const auth = await authenticateRequest(req);
+  if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
+  const permission = requirePermission(auth.user, "artifact:read");
+  if (!permission.ok) return NextResponse.json({ error: permission.error }, { status: permission.status });
 
   try {
     const { id } = await params;
@@ -30,6 +37,9 @@ export async function GET(
     const run = await repo.getRun(id);
     if (!run) {
       return NextResponse.json({ error: "Run not found" }, { status: 404 });
+    }
+    if (!hasOrganizationAccess(auth.user, run.organizationId)) {
+      return NextResponse.json({ error: "Organization access denied" }, { status: 403 });
     }
 
     const artifacts = await listArtifacts(run.organizationId, id);
@@ -57,6 +67,10 @@ export async function POST(
   if (!isArtifactStorageEnabled()) {
     return NextResponse.json({ error: "Artifact storage not configured" }, { status: 503 });
   }
+  const auth = await authenticateRequest(req);
+  if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
+  const permission = requirePermission(auth.user, "artifact:write");
+  if (!permission.ok) return NextResponse.json({ error: permission.error }, { status: permission.status });
 
   try {
     const { id } = await params;
@@ -64,6 +78,9 @@ export async function POST(
     const run = await repo.getRun(id);
     if (!run) {
       return NextResponse.json({ error: "Run not found" }, { status: 404 });
+    }
+    if (!hasOrganizationAccess(auth.user, run.organizationId)) {
+      return NextResponse.json({ error: "Organization access denied" }, { status: 403 });
     }
 
     const formData = await req.formData();

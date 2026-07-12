@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { sanitizeError } from "@/lib/api-errors";
 import { getEnterpriseDb, isEnterpriseEnabled } from "@/lib/enterprise/db";
 import { authenticateRequest } from "@/lib/enterprise/auth";
-import { requirePermission } from "@/lib/enterprise/rbac";
+import { hasPermission, requirePermission } from "@/lib/enterprise/rbac";
+import { resolveOrganizationAccess } from "@/lib/enterprise/request-access";
 import { writeAuditEvent } from "@/lib/enterprise/audit-log";
 import { checkRateLimit, getClientKey } from "@/lib/enterprise/rate-limit";
 import { randomUUID } from "node:crypto";
@@ -35,8 +36,14 @@ export async function GET(req: Request) {
 
   try {
     const url = new URL(req.url);
-    const organizationId = url.searchParams.get("organizationId") ?? "default";
+    const access = resolveOrganizationAccess(auth.user, url.searchParams.get("organizationId"));
+    if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status });
+    const organizationId = access.organizationId;
     const includeInactive = url.searchParams.get("includeInactive") === "true";
+    const canManage = hasPermission(auth.user, "config:manage");
+    if (includeInactive && !canManage) {
+      return NextResponse.json({ error: "Permission denied: config:manage required" }, { status: 403 });
+    }
 
     const db = await getEnterpriseDb();
     if (!db) return NextResponse.json({ error: "Database not available" }, { status: 503 });
@@ -54,7 +61,7 @@ export async function GET(req: Request) {
     );
 
     return NextResponse.json({
-      agents: result.rows.map(toAgentRecord),
+      agents: result.rows.map((row) => toAgentRecord(row, canManage)),
     });
   } catch (error) {
     return NextResponse.json({ error: sanitizeError(error) }, { status: 500 });
@@ -97,7 +104,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "name is required" }, { status: 400 });
     }
 
-    const organizationId = body.organizationId ?? "default";
+    const access = resolveOrganizationAccess(auth.user, body.organizationId);
+    if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status });
+    const organizationId = access.organizationId;
     const agentId = body.id?.trim() || randomUUID();
 
     const db = await getEnterpriseDb();
@@ -124,7 +133,7 @@ export async function POST(req: Request) {
         body.systemPrompt ?? "",
         body.defaultModelProvider ?? "openai",
         body.defaultModelId ?? "gpt-4o",
-        body.defaultTools ?? ["read", "bash", "edit", "write"],
+        JSON.stringify(body.defaultTools ?? ["read", "bash", "edit", "write"]),
       ],
     );
 
@@ -149,13 +158,13 @@ export async function POST(req: Request) {
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
-function toAgentRecord(row: Record<string, unknown>): AgentRecord {
+function toAgentRecord(row: Record<string, unknown>, includeSensitive: boolean): AgentRecord {
   return {
     id: row.id as string,
     organizationId: row.organization_id as string,
     name: row.name as string,
     description: (row.description as string) ?? "",
-    systemPrompt: (row.system_prompt as string) ?? "",
+    systemPrompt: includeSensitive ? (row.system_prompt as string) ?? "" : "",
     defaultModelProvider: (row.default_model_provider as string) ?? "openai",
     defaultModelId: (row.default_model_id as string) ?? "gpt-4o",
     defaultTools: Array.isArray(row.default_tools) ? (row.default_tools as string[]) : [],

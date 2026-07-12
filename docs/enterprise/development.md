@@ -188,6 +188,31 @@ $env:OPENAI_API_KEY = "sk-..."
 npx tsx packages/enterprise-worker/src/main.ts
 ```
 
+### Control plane and Docker worker configuration
+
+Enterprise mode defaults to OIDC. The issuer must provide `sub`, an organization
+claim (`org_id` or `organization`), and a roles claim (`roles` by default).
+
+```powershell
+$env:PI_AUTH_MODE = "oidc"
+$env:PI_OIDC_ISSUER = "https://id.example.com/realms/pi"
+$env:PI_OIDC_AUDIENCE = "pi-enterprise"
+$env:PI_OIDC_ROLES_CLAIM = "roles"
+
+# Multiple allowed roots use the platform PATH separator (`;` on Windows).
+$env:PI_ENTERPRISE_WORKSPACE_ROOTS = "E:\projects;E:\customer-workspaces"
+
+$env:PI_WORKER_MODE = "docker"
+$env:PI_WORKER_DOCKER_IMAGE = "pi-enterprise-worker:local"
+docker build --build-arg NPM_REGISTRY=https://registry.npmmirror.com `
+  -f Dockerfile.worker -t pi-enterprise-worker:local .
+```
+
+Conversation creation rejects missing paths and paths outside
+`PI_ENTERPRISE_WORKSPACE_ROOTS`. Docker workers mount the selected workspace at
+`/workspace`, run as a non-root user with all Linux capabilities dropped, and
+only receive allowlisted model provider environment variables.
+
 ### Key modules
 
 - `src/run-executor.ts` — Core execution: envelope → PG → brokered harness → model → prompt → events
@@ -197,11 +222,10 @@ npx tsx packages/enterprise-worker/src/main.ts
 
 ### Event collection
 
-Harness events are collected during execution and sanitized (API keys, tokens,
-and headers stripped). Events are returned as part of the RunResult.
-
-Future phases will persist events to PostgreSQL as `run_events` for real-time
-SSE streaming to the frontend.
+Harness events are sanitized (API keys, tokens, and headers stripped), written
+to `enterprise_run_events` in sequence, and announced with PostgreSQL
+`LISTEN/NOTIFY` for real-time SSE streaming. The worker flushes pending events
+before closing its database connection.
 
 ### Design documents
 

@@ -89,5 +89,118 @@ async function ensureSchema(client) {
     create index if not exists enterprise_session_entries_parent_idx
       on enterprise_session_entries(session_id, parent_id)
   `);
+    // Enterprise runs and run events
+    await client.query(`
+    create table if not exists enterprise_runs (
+      id text primary key,
+      conversation_id text not null,
+      organization_id text not null,
+      status text not null default 'pending',
+      model_provider text not null,
+      model_id text not null,
+      user_input text not null,
+      response text null,
+      error text null,
+      worker_pid integer null,
+      agent_id text null,
+      agent_snapshot jsonb null,
+      created_at timestamptz not null default now(),
+      started_at timestamptz null,
+      completed_at timestamptz null
+    )
+  `);
+    await client.query(`
+    alter table enterprise_runs
+      add column if not exists agent_id text null,
+      add column if not exists agent_snapshot jsonb null
+  `);
+    await client.query(`
+    create index if not exists enterprise_runs_conversation_idx
+      on enterprise_runs(conversation_id)
+  `);
+    await client.query(`
+    create index if not exists enterprise_runs_org_idx
+      on enterprise_runs(organization_id, created_at desc)
+  `);
+    await client.query(`
+    create table if not exists enterprise_run_events (
+      run_id text not null references enterprise_runs(id) on delete cascade,
+      seq integer not null,
+      event_type text not null,
+      event_data jsonb not null,
+      recorded_at timestamptz not null default now(),
+      primary key (run_id, seq)
+    )
+  `);
+    // Audit log — append-only
+    await client.query(`
+    create table if not exists enterprise_audit_events (
+      id bigserial primary key,
+      organization_id text not null,
+      actor_id text not null default 'system',
+      action text not null,
+      resource_type text not null,
+      resource_id text not null,
+      details jsonb not null default '{}'::jsonb,
+      ip_address text null,
+      recorded_at timestamptz not null default now()
+    )
+  `);
+    await client.query(`
+    create index if not exists enterprise_audit_org_idx
+      on enterprise_audit_events(organization_id, recorded_at desc)
+  `);
+    await client.query(`
+    create index if not exists enterprise_audit_resource_idx
+      on enterprise_audit_events(resource_type, resource_id)
+  `);
+    // Quota management tables
+    await client.query(`
+    create table if not exists enterprise_quotas (
+      organization_id text primary key,
+      max_runs_per_day integer not null default 100,
+      max_runs_per_hour integer not null default 20,
+      max_concurrent_runs integer not null default 5,
+      updated_at timestamptz not null default now()
+    )
+  `);
+    await client.query(`
+    create table if not exists enterprise_usage (
+      id bigserial primary key,
+      organization_id text not null,
+      user_id text not null,
+      run_id text not null,
+      tokens_in bigint not null default 0,
+      tokens_out bigint not null default 0,
+      model_provider text not null,
+      model_id text not null,
+      recorded_at timestamptz not null default now()
+    )
+  `);
+    await client.query(`
+    create index if not exists enterprise_usage_org_idx
+      on enterprise_usage(organization_id, recorded_at desc)
+  `);
+    // Agent registry
+    await client.query(`
+    create table if not exists enterprise_agents (
+      id text not null,
+      organization_id text not null,
+      name text not null,
+      description text not null default '',
+      system_prompt text not null default '',
+      default_model_provider text not null default 'openai',
+      default_model_id text not null default 'gpt-4o',
+      default_tools jsonb not null default '[]'::jsonb,
+      is_active boolean not null default true,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now(),
+      primary key (id, organization_id)
+    )
+  `);
+    await client.query(`
+    create index if not exists enterprise_agents_org_idx
+      on enterprise_agents(organization_id, is_active)
+  `);
 }
 //# sourceMappingURL=db.js.map

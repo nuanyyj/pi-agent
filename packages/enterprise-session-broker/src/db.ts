@@ -128,10 +128,17 @@ async function ensureSchema(client: Client): Promise<void> {
       response text null,
       error text null,
       worker_pid integer null,
+      agent_id text null,
+      agent_snapshot jsonb null,
       created_at timestamptz not null default now(),
       started_at timestamptz null,
       completed_at timestamptz null
     )
+  `);
+  await client.query(`
+    alter table enterprise_runs
+      add column if not exists agent_id text null,
+      add column if not exists agent_snapshot jsonb null
   `);
   await client.query(`
     create index if not exists enterprise_runs_conversation_idx

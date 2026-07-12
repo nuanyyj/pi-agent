@@ -18,8 +18,6 @@ interface AuthContextValue extends AuthState {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-const TOKEN_STORAGE_KEY = "pi-enterprise-auth-token";
-
 export function EnterpriseAuthProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AuthState>({
     mode: "token",
@@ -30,19 +28,10 @@ export function EnterpriseAuthProvider({ children }: { children: ReactNode }) {
   });
   const [loading, setLoading] = useState(true);
 
-  // Load stored token and validate
-  useEffect(() => {
-    const stored = localStorage.getItem(TOKEN_STORAGE_KEY);
-    checkAuth(stored);
-  }, []);
-
-  const checkAuth = useCallback(async (token: string | null) => {
+  const checkAuth = useCallback(async () => {
     setLoading(true);
     try {
-      const headers: Record<string, string> = {};
-      if (token) headers["Authorization"] = `Bearer ${token}`;
-
-      const res = await fetch("/api/enterprise/v1/auth", { headers });
+      const res = await fetch("/api/enterprise/v1/auth");
       const data = (await res.json()) as {
         mode: string;
         disabled: boolean;
@@ -54,13 +43,9 @@ export function EnterpriseAuthProvider({ children }: { children: ReactNode }) {
         mode: data.mode,
         disabled: data.disabled,
         authenticated: data.authenticated,
-        token: data.authenticated ? token : null,
+        token: null,
         error: data.error ?? null,
       });
-
-      if (data.authenticated && token) {
-        localStorage.setItem(TOKEN_STORAGE_KEY, token);
-      }
     } catch {
       setState((prev) => ({ ...prev, error: "Failed to check auth status" }));
     } finally {
@@ -68,12 +53,38 @@ export function EnterpriseAuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const setToken = useCallback((token: string) => {
-    checkAuth(token);
+  // Validate the same-origin HttpOnly session cookie.
+  useEffect(() => {
+    checkAuth();
   }, [checkAuth]);
 
+  const setToken = useCallback((token: string) => {
+    setLoading(true);
+    fetch("/api/enterprise/v1/auth", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    }).then(async (res) => {
+      const data = await res.json() as {
+        mode?: string;
+        disabled?: boolean;
+        authenticated?: boolean;
+        error?: string;
+      };
+      setState((prev) => ({
+        ...prev,
+        mode: data.mode ?? prev.mode,
+        disabled: data.disabled ?? prev.disabled,
+        authenticated: Boolean(data.authenticated),
+        token: null,
+        error: data.error ?? null,
+      }));
+    }).catch(() => {
+      setState((prev) => ({ ...prev, authenticated: false, error: "Authentication request failed" }));
+    }).finally(() => setLoading(false));
+  }, []);
+
   const logout = useCallback(() => {
-    localStorage.removeItem(TOKEN_STORAGE_KEY);
+    fetch("/api/enterprise/v1/auth", { method: "DELETE" }).catch(() => {});
     setState({
       mode: "token",
       disabled: true,
@@ -84,12 +95,8 @@ export function EnterpriseAuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const fetchWithAuth = useCallback(async (url: string, init?: RequestInit): Promise<Response> => {
-    const headers = new Headers(init?.headers);
-    if (state.token) {
-      headers.set("Authorization", `Bearer ${state.token}`);
-    }
-    return fetch(url, { ...init, headers });
-  }, [state.token]);
+    return fetch(url, init);
+  }, []);
 
   // Show loading spinner while checking
   if (loading) {

@@ -21,6 +21,12 @@ import type { SessionStatsInfo } from "@/lib/pi-types";
 import { EnterpriseBadge } from "./EnterpriseBadge";
 import { EnterpriseChatPanel } from "./EnterpriseChatPanel";
 import { useEnterprise } from "@/hooks/useEnterprise";
+import type { EnterpriseConversation } from "@/hooks/useEnterprise";
+import { EnterpriseConversationList } from "./EnterpriseConversationList";
+import { EnterpriseAuditLog } from "./EnterpriseAuditLog";
+import { EnterpriseErrorBoundary } from "./EnterpriseErrorBoundary";
+import { RunDashboard } from "./RunDashboard";
+import { EnterpriseAdmin } from "./EnterpriseAdmin";
 
 type SessionCopyField = "file" | "id";
 
@@ -31,6 +37,9 @@ export function AppShell() {
   const isMobile = useIsMobile();
   const enterprise = useEnterprise();
   const [enterpriseMode, setEnterpriseMode] = useState(false);
+  const [selectedEnterpriseConversation, setSelectedEnterpriseConversation] = useState<EnterpriseConversation | null>(null);
+  const [enterpriseRefreshKey, setEnterpriseRefreshKey] = useState(0);
+  const [enterpriseView, setEnterpriseView] = useState<"chat" | "audit" | "dashboard" | "admin">("chat");
   const [selectedSession, setSelectedSession] = useState<SessionInfo | null>(null);
   // When user clicks +, we only store the cwd — no fake session id
   const [newSessionCwd, setNewSessionCwd] = useState<string | null>(null);
@@ -377,6 +386,23 @@ export function AppShell() {
               <path d="M3 9h18" />
             </svg>
             Dashboard
+          </button>
+          <button
+            onClick={() => setEnterpriseView(enterpriseView === "admin" ? "chat" : "admin")}
+            style={{
+              width: "100%", height: 30, fontSize: 12,
+              background: enterpriseView === "admin" ? "var(--accent)" : "transparent",
+              color: enterpriseView === "admin" ? "#fff" : "var(--text-muted)",
+              border: "1px solid var(--border)", borderRadius: 6,
+              cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+              marginTop: 4,
+            }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6h.08a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9v.08a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09A1.65 1.65 0 0 0 19.4 15z" />
+            </svg>
+            Admin
           </button>
         </div>
         </>
@@ -1040,6 +1066,8 @@ export function AppShell() {
             <EnterpriseErrorBoundary><RunDashboard organizationId={enterprise.organizationId} /></EnterpriseErrorBoundary>
           ) : showChat && enterpriseMode && enterpriseView === "audit" ? (
             <EnterpriseErrorBoundary><EnterpriseAuditLog organizationId={enterprise.organizationId} /></EnterpriseErrorBoundary>
+          ) : showChat && enterpriseMode && enterpriseView === "admin" ? (
+            <EnterpriseErrorBoundary><EnterpriseAdmin organizationId={enterprise.organizationId} /></EnterpriseErrorBoundary>
           ) : showChat && enterpriseMode ? (
             selectedEnterpriseConversation ? (
               <EnterpriseErrorBoundary><EnterpriseChatPanel conversation={selectedEnterpriseConversation} /></EnterpriseErrorBoundary>
@@ -1162,12 +1190,3 @@ export function AppShell() {
     </>
   );
 }
-import { EnterpriseConversationList } from "./EnterpriseConversationList";
-import { EnterpriseAuditLog } from "./EnterpriseAuditLog";
-import { EnterpriseErrorBoundary } from "./EnterpriseErrorBoundary";
-import { RunDashboard } from "./RunDashboard";
-import { EnterpriseAdmin } from "./EnterpriseAdmin";
-import type { EnterpriseConversation } from "@/hooks/useEnterprise";
-  const [selectedEnterpriseConversation, setSelectedEnterpriseConversation] = useState<EnterpriseConversation | null>(null);
-  const [enterpriseRefreshKey, setEnterpriseRefreshKey] = useState(0);
-  const [enterpriseView, setEnterpriseView] = useState<"chat" | "audit" | "dashboard" | "admin">("chat");

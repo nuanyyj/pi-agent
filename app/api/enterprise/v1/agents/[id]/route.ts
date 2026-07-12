@@ -3,6 +3,7 @@ import { sanitizeError } from "@/lib/api-errors";
 import { getEnterpriseDb, isEnterpriseEnabled } from "@/lib/enterprise/db";
 import { authenticateRequest } from "@/lib/enterprise/auth";
 import { requirePermission } from "@/lib/enterprise/rbac";
+import { resolveOrganizationAccess } from "@/lib/enterprise/request-access";
 import { writeAuditEvent } from "@/lib/enterprise/audit-log";
 import { checkRateLimit, getClientKey } from "@/lib/enterprise/rate-limit";
 
@@ -20,7 +21,9 @@ export async function GET(
   try {
     const { id } = await params;
     const url = new URL(req.url);
-    const organizationId = url.searchParams.get("organizationId") ?? "default";
+    const access = resolveOrganizationAccess(auth.user, url.searchParams.get("organizationId"));
+    if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status });
+    const organizationId = access.organizationId;
 
     const db = await getEnterpriseDb();
     if (!db) return NextResponse.json({ error: "Database not available" }, { status: 503 });
@@ -38,9 +41,10 @@ export async function GET(
     }
 
     const row = result.rows[0] as Record<string, unknown>;
+    const canManage = requirePermission(auth.user, "config:manage").ok;
     return NextResponse.json({
       id: row.id, organizationId: row.organization_id, name: row.name,
-      description: row.description, systemPrompt: row.system_prompt,
+      description: row.description, systemPrompt: canManage ? row.system_prompt : "",
       defaultModelProvider: row.default_model_provider, defaultModelId: row.default_model_id,
       defaultTools: row.default_tools, isActive: row.is_active,
       createdAt: row.created_at, updatedAt: row.updated_at,
@@ -71,7 +75,9 @@ export async function DELETE(
   try {
     const { id } = await params;
     const url = new URL(req.url);
-    const organizationId = url.searchParams.get("organizationId") ?? "default";
+    const access = resolveOrganizationAccess(auth.user, url.searchParams.get("organizationId"));
+    if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status });
+    const organizationId = access.organizationId;
 
     const db = await getEnterpriseDb();
     if (!db) return NextResponse.json({ error: "Database not available" }, { status: 503 });

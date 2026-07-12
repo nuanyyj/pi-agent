@@ -41,7 +41,7 @@ export function RunHistory({ conversationId, activeRunId, onSelectRun, onLoadRun
   // Refresh when active run changes (new run completed, etc.)
   useEffect(() => {
     if (expanded) loadRuns();
-  }, [activeRunId]);
+  }, [activeRunId, expanded, loadRuns]);
 
   if (runs.length === 0 && !expanded) {
     return (

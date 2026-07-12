@@ -17,6 +17,8 @@ export type EnterpriseRun = {
   status: "pending" | "running" | "completed" | "failed" | "cancelled";
   modelProvider: string;
   modelId: string;
+  agentId?: string;
+  agentName?: string;
   userInput: string;
   response?: string;
   error?: string;
@@ -24,6 +26,17 @@ export type EnterpriseRun = {
   createdAt: string;
   startedAt?: string;
   completedAt?: string;
+};
+
+export type EnterpriseAgent = {
+  id: string;
+  organizationId: string;
+  name: string;
+  description: string;
+  defaultModelProvider: string;
+  defaultModelId: string;
+  defaultTools: string[];
+  isActive: boolean;
 };
 
 export type EnterpriseRunEvent = {
@@ -50,12 +63,16 @@ interface EnterpriseContextValue {
   // Runs
   createRun: (input: {
     conversationId: string;
-    modelProvider: string;
-    modelId: string;
+    agentId?: string;
+    modelProvider?: string;
+    modelId?: string;
     userInput: string;
     systemPrompt?: string;
     toolNames?: string[];
   }) => Promise<EnterpriseRun>;
+  agents: EnterpriseAgent[];
+  agentsLoading: boolean;
+  loadAgents: () => Promise<void>;
   getRun: (id: string) => Promise<EnterpriseRun>;
   cancelRun: (id: string) => Promise<void>;
   deleteConversation: (id: string) => Promise<void>;
@@ -79,6 +96,8 @@ export function EnterpriseProvider({ children }: { children: ReactNode }) {
   const [organizationId, setOrganizationId] = useState("default");
   const [conversations, setConversations] = useState<EnterpriseConversation[]>([]);
   const [conversationsLoading, setConversationsLoading] = useState(false);
+  const [agents, setAgents] = useState<EnterpriseAgent[]>([]);
+  const [agentsLoading, setAgentsLoading] = useState(false);
 
   // Check enterprise mode on mount
   useEffect(() => {
@@ -127,11 +146,28 @@ export function EnterpriseProvider({ children }: { children: ReactNode }) {
 
   // ── Runs ──────────────────────────────────────────────────────────
 
+  const loadAgents = useCallback(async () => {
+    if (!isEnabled) return;
+    setAgentsLoading(true);
+    try {
+      const res = await fetch(`/api/enterprise/v1/agents?organizationId=${encodeURIComponent(organizationId)}`);
+      if (!res.ok) throw new Error("Failed to load agents");
+      const data = (await res.json()) as { agents: EnterpriseAgent[] };
+      setAgents(data.agents);
+    } catch (err) {
+      console.error("[enterprise] loadAgents failed:", err);
+      setAgents([]);
+    } finally {
+      setAgentsLoading(false);
+    }
+  }, [isEnabled, organizationId]);
+
   const createRun = useCallback(
     async (input: {
       conversationId: string;
-      modelProvider: string;
-      modelId: string;
+      agentId?: string;
+      modelProvider?: string;
+      modelId?: string;
       userInput: string;
       systemPrompt?: string;
       toolNames?: string[];
@@ -141,7 +177,10 @@ export function EnterpriseProvider({ children }: { children: ReactNode }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...input, organizationId }),
       });
-      if (!res.ok) throw new Error("Failed to create run");
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({})) as { error?: string };
+        throw new Error(data.error ?? "Failed to create run");
+      }
       return (await res.json()) as EnterpriseRun;
     },
     [organizationId],
@@ -253,6 +292,9 @@ export function EnterpriseProvider({ children }: { children: ReactNode }) {
     loadConversations,
     createConversation,
     createRun,
+    agents,
+    agentsLoading,
+    loadAgents,
     getRun,
     cancelRun,
     deleteConversation,

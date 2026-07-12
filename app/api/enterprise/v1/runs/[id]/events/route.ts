@@ -1,7 +1,10 @@
-import { getEnterpriseDb, isEnterpriseEnabled } from "@/lib/enterprise/db";
+import { isEnterpriseEnabled } from "@/lib/enterprise/db";
 import { getRunRepository } from "@/lib/enterprise/run-repo";
 import { Client } from "pg";
 import { sanitizeObject } from "@/lib/enterprise/sanitizer";
+import { authenticateRequest } from "@/lib/enterprise/auth";
+import { requirePermission } from "@/lib/enterprise/rbac";
+import { hasOrganizationAccess } from "@/lib/enterprise/request-access";
 
 export const dynamic = "force-dynamic";
 
@@ -25,6 +28,10 @@ export async function GET(
   if (!isEnterpriseEnabled()) {
     return new Response("Enterprise mode not enabled", { status: 503 });
   }
+  const auth = await authenticateRequest(req);
+  if (!auth.ok) return new Response(auth.error, { status: auth.status });
+  const permission = requirePermission(auth.user, "run:read");
+  if (!permission.ok) return new Response(permission.error, { status: permission.status });
 
   const { id } = await params;
 
@@ -43,6 +50,11 @@ export async function GET(
     counts.set(id, (counts.get(id) ?? 1) - 1);
     if ((counts.get(id) ?? 0) <= 0) counts.delete(id);
     return new Response("Run not found", { status: 404 });
+  }
+  if (!hasOrganizationAccess(auth.user, run.organizationId)) {
+    counts.set(id, (counts.get(id) ?? 1) - 1);
+    if ((counts.get(id) ?? 0) <= 0) counts.delete(id);
+    return new Response("Organization access denied", { status: 403 });
   }
 
   // If run is already terminal, send final event immediately
@@ -126,7 +138,7 @@ export async function GET(
             sendEvent(event);
             lastSeq = event.seq;
           }
-          if (events.length > 0) await checkTerminal();
+          await checkTerminal();
         } catch {
           sendEvent({ type: "error", message: "Fetch failed" });
         }

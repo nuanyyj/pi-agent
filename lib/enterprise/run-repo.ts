@@ -8,6 +8,7 @@
  */
 
 import type { EnterpriseDatabase } from "@pi-web/enterprise-session-broker";
+import type { AgentExecutionSnapshot } from "./agent-runtime";
 
 export type RunStatus = "pending" | "running" | "completed" | "failed" | "cancelled";
 
@@ -18,6 +19,8 @@ export interface RunRecord {
   status: RunStatus;
   modelProvider: string;
   modelId: string;
+  agentId?: string;
+  agentName?: string;
   userInput: string;
   response?: string;
   error?: string;
@@ -40,6 +43,7 @@ export interface RunEvent {
 interface InMemoryRun {
   record: RunRecord;
   events: RunEvent[];
+  executionSnapshot?: AgentExecutionSnapshot;
   abortController?: AbortController;
 }
 
@@ -55,7 +59,8 @@ function getMemStore(): Map<string, InMemoryRun> {
 // ── Repository ─────────────────────────────────────────────────────────
 
 export interface RunRepository {
-  createRun(record: RunRecord): Promise<void>;
+  createRun(record: RunRecord, executionSnapshot?: AgentExecutionSnapshot): Promise<void>;
+  getRunExecutionSnapshot(id: string): Promise<AgentExecutionSnapshot | null>;
   getRun(id: string): Promise<RunRecord | null>;
   listRuns(filter?: { conversationId?: string; organizationId?: string }): Promise<RunRecord[]>;
   updateRun(id: string, patch: Partial<RunRecord>): Promise<RunRecord | null>;
@@ -70,18 +75,32 @@ export interface RunRepository {
 
 export function createPgRunRepository(db: EnterpriseDatabase): RunRepository {
   return {
-    async createRun(record) {
+    async createRun(record, executionSnapshot) {
       await db.query(
-        `insert into enterprise_runs (id, conversation_id, organization_id, status, model_provider, model_id, user_input, created_at)
-         values ($1, $2, $3, $4, $5, $6, $7, $8)`,
-        [record.id, record.conversationId, record.organizationId, record.status, record.modelProvider, record.modelId, record.userInput, record.createdAt],
+        `insert into enterprise_runs
+           (id, conversation_id, organization_id, status, model_provider, model_id,
+            user_input, agent_id, agent_snapshot, created_at)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        [record.id, record.conversationId, record.organizationId, record.status,
+          record.modelProvider, record.modelId, record.userInput, record.agentId ?? null,
+          executionSnapshot ? JSON.stringify(executionSnapshot) : null, record.createdAt],
       );
+    },
+
+    async getRunExecutionSnapshot(id) {
+      const { rows } = await db.query<{ agent_snapshot: AgentExecutionSnapshot | string | null }>(
+        `select agent_snapshot from enterprise_runs where id = $1`,
+        [id],
+      );
+      const value = rows[0]?.agent_snapshot;
+      if (!value) return null;
+      return typeof value === "string" ? JSON.parse(value) as AgentExecutionSnapshot : value;
     },
 
     async getRun(id) {
       const { rows } = await db.query<{
         id: string; conversation_id: string; organization_id: string; status: string;
-        model_provider: string; model_id: string; user_input: string;
+        model_provider: string; model_id: string; user_input: string; agent_id: string | null; agent_snapshot: unknown;
         response: string | null; error: string | null;
         created_at: string; started_at: string | null; completed_at: string | null; worker_pid: number | null;
       }>(
@@ -116,7 +135,7 @@ export function createPgRunRepository(db: EnterpriseDatabase): RunRepository {
       const where = conditions.length > 0 ? `where ${conditions.join(" and ")}` : "";
       const { rows } = await db.query<{
         id: string; conversation_id: string; organization_id: string; status: string;
-        model_provider: string; model_id: string; user_input: string;
+        model_provider: string; model_id: string; user_input: string; agent_id: string | null; agent_snapshot: unknown;
         response: string | null; error: string | null;
         created_at: string; started_at: string | null; completed_at: string | null; worker_pid: number | null;
       }>(
@@ -223,8 +242,12 @@ export function createMemRunRepository(): RunRepository {
   const abortControllers = new Map<string, AbortController>();
 
   return {
-    async createRun(record) {
-      getMemStore().set(record.id, { record: { ...record }, events: [] });
+    async createRun(record, executionSnapshot) {
+      getMemStore().set(record.id, { record: { ...record }, events: [], executionSnapshot });
+    },
+
+    async getRunExecutionSnapshot(id) {
+      return getMemStore().get(id)?.executionSnapshot ?? null;
     },
 
     async getRun(id) {
@@ -306,7 +329,7 @@ export async function getRunRepository(): Promise<RunRepository> {
 
 function toRunRecord(row: {
   id: string; conversation_id: string; organization_id: string; status: string;
-  model_provider: string; model_id: string; user_input: string;
+  model_provider: string; model_id: string; user_input: string; agent_id: string | null; agent_snapshot: unknown;
   response: string | null; error: string | null;
   created_at: string; started_at: string | null; completed_at: string | null; worker_pid: number | null;
 }, eventCount: number): RunRecord {
@@ -317,6 +340,8 @@ function toRunRecord(row: {
     status: row.status as RunStatus,
     modelProvider: row.model_provider,
     modelId: row.model_id,
+    agentId: row.agent_id ?? undefined,
+    agentName: getAgentName(row.agent_snapshot),
     userInput: row.user_input,
     response: row.response ?? undefined,
     error: row.error ?? undefined,
@@ -326,4 +351,12 @@ function toRunRecord(row: {
     completedAt: row.completed_at ?? undefined,
     workerPid: row.worker_pid ?? undefined,
   };
+}
+
+function getAgentName(snapshot: unknown): string | undefined {
+  if (!snapshot) return undefined;
+  const value = typeof snapshot === "string" ? JSON.parse(snapshot) as unknown : snapshot;
+  if (!value || typeof value !== "object") return undefined;
+  const name = (value as { agentName?: unknown }).agentName;
+  return typeof name === "string" ? name : undefined;
 }

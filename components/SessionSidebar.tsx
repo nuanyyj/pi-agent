@@ -2,6 +2,7 @@
 
 import { useEffect, useLayoutEffect, useState, useCallback, useRef, type CSSProperties, type ReactNode } from "react";
 import type { SessionInfo } from "@/lib/types";
+import { expandHomePath } from "@/lib/expand-home-path";
 import { FileExplorer } from "./FileExplorer";
 
 interface Props {
@@ -544,7 +545,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   }, [allSessions, selectedCwd, initialSessionId, onSelectSession, onInitialRestoreDone]);
 
   const commitCustomPath = useCallback(async () => {
-    const path = customPathValue.trim();
+    const path = expandHomePath(customPathValue.trim(), homeDir);
     if (!path || customPathValidating) return;
 
     setCustomPathValidating(true);
@@ -569,7 +570,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     } finally {
       setCustomPathValidating(false);
     }
-  }, [customPathValue, customPathValidating]);
+  }, [customPathValue, customPathValidating, homeDir]);
 
   const handleDefaultCwd = useCallback(async () => {
     try {

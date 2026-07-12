@@ -3,8 +3,9 @@ import { sanitizeError } from "@/lib/api-errors";
 import { getEnterpriseDb, isEnterpriseEnabled } from "@/lib/enterprise/db";
 import { authenticateRequest } from "@/lib/enterprise/auth";
 import { requirePermission } from "@/lib/enterprise/rbac";
-import { getQuotaConfig, updateQuotaConfig, getUsageSummary } from "@/lib/enterprise/quota";
+import { updateQuotaConfig, getUsageSummary } from "@/lib/enterprise/quota";
 import { checkRateLimit, getClientKey } from "@/lib/enterprise/rate-limit";
+import { resolveOrganizationAccess } from "@/lib/enterprise/request-access";
 
 /**
  * GET /api/enterprise/v1/quota
@@ -25,7 +26,9 @@ export async function GET(req: Request) {
 
   try {
     const url = new URL(req.url);
-    const organizationId = url.searchParams.get("organizationId") ?? "default";
+    const access = resolveOrganizationAccess(auth.user, url.searchParams.get("organizationId"));
+    if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status });
+    const organizationId = access.organizationId;
 
     const db = await getEnterpriseDb();
     if (!db) return NextResponse.json({ error: "Database not available" }, { status: 503 });
@@ -65,14 +68,16 @@ export async function PUT(req: Request) {
       maxConcurrentRuns?: number;
     };
 
-    const organizationId = body.organizationId ?? "default";
+    const access = resolveOrganizationAccess(auth.user, body.organizationId);
+    if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status });
+    const organizationId = access.organizationId;
 
     const db = await getEnterpriseDb();
     if (!db) return NextResponse.json({ error: "Database not available" }, { status: 503 });
 
     const config = await updateQuotaConfig(db, {
-      organizationId,
       ...body,
+      organizationId,
     });
 
     return NextResponse.json(config);

@@ -19,6 +19,9 @@ export function EnterpriseChatPanel({ conversation }: { conversation: Enterprise
     cancelRun,
     subscribeRunEvents,
     getRunHistory,
+    agents,
+    agentsLoading,
+    loadAgents,
   } = useEnterprise();
 
   const conversationRef = useRef(conversation);
@@ -31,6 +34,7 @@ export function EnterpriseChatPanel({ conversation }: { conversation: Enterprise
   const [isRunning, setIsRunning] = useState(false);
   const [modelProvider, setModelProvider] = useState("openai");
   const [modelId, setModelId] = useState("gpt-4o");
+  const [selectedAgentId, setSelectedAgentId] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const unsubscribeRef = useRef<(() => void) | null>(null);
 
@@ -41,6 +45,10 @@ export function EnterpriseChatPanel({ conversation }: { conversation: Enterprise
     setActiveRun(null);
     setIsRunning(false);
   }, [conversation.id]);
+
+  useEffect(() => {
+    loadAgents();
+  }, [loadAgents]);
 
   // Auto-scroll on new messages
   useEffect(() => {
@@ -78,8 +86,9 @@ export function EnterpriseChatPanel({ conversation }: { conversation: Enterprise
     try {
       const run = await createRun({
         conversationId: conversationRef.current.id,
-        modelProvider,
-        modelId,
+        ...(selectedAgentId
+          ? { agentId: selectedAgentId }
+          : { modelProvider, modelId }),
         userInput,
       });
 
@@ -100,8 +109,8 @@ export function EnterpriseChatPanel({ conversation }: { conversation: Enterprise
               return [...prev, {
                 role: "assistant" as const,
                 content: [{ type: "text" as const, text: response }],
-                model: modelId,
-                provider: modelProvider,
+                model: run.modelId,
+                provider: run.modelProvider,
               }];
             });
           }
@@ -113,7 +122,7 @@ export function EnterpriseChatPanel({ conversation }: { conversation: Enterprise
       console.error("[enterprise] create run failed:", err);
       setIsRunning(false);
     }
-  }, [inputValue, isRunning, modelProvider, modelId, createRun, subscribeRunEvents]);
+  }, [inputValue, isRunning, modelProvider, modelId, selectedAgentId, createRun, subscribeRunEvents]);
 
   const handleCancel = useCallback(async () => {
     if (!activeRun) return;
@@ -162,9 +171,35 @@ const handleLoadRunHistory = useCallback(async (runId: string) => {
         padding: "6px 12px", borderBottom: "1px solid var(--border)",
         background: "var(--bg-panel)", flexShrink: 0, fontSize: 11,
       }}>
+        <span style={{ color: "var(--text-muted)" }}>Agent:</span>
+        <select
+          value={selectedAgentId}
+          disabled={agentsLoading}
+          onChange={(e) => {
+            const id = e.target.value;
+            setSelectedAgentId(id);
+            const agent = agents.find((item) => item.id === id);
+            if (agent) {
+              setModelProvider(agent.defaultModelProvider);
+              setModelId(agent.defaultModelId);
+            }
+          }}
+          style={{
+            height: 24, minWidth: 130, fontSize: 11,
+            background: "var(--bg)", color: "var(--text)",
+            border: "1px solid var(--border)", borderRadius: 3,
+            padding: "0 4px",
+          }}
+        >
+          <option value="">Custom</option>
+          {agents.map((agent) => (
+            <option key={agent.id} value={agent.id}>{agent.name}</option>
+          ))}
+        </select>
         <span style={{ color: "var(--text-muted)" }}>Model:</span>
         <select
           value={modelProvider}
+          disabled={Boolean(selectedAgentId)}
           onChange={(e) => setModelProvider(e.target.value)}
           style={{
             height: 24, fontSize: 11,
@@ -179,6 +214,7 @@ const handleLoadRunHistory = useCallback(async (runId: string) => {
         </select>
         <input
           value={modelId}
+          disabled={Boolean(selectedAgentId)}
           onChange={(e) => setModelId(e.target.value)}
           placeholder="model-id"
           style={{
