@@ -1,4 +1,6 @@
 import { Client, Pool } from "pg";
+const ENTERPRISE_SCHEMA_BOOTSTRAP_LOCK_ID = "682273674017965874";
+const CORE_TENANT_RLS_MIGRATION = "20260712_core_tenant_rls_v1";
 function wrapClientQuery(client) {
     return async function query(sql, params) {
         const res = params
@@ -12,8 +14,42 @@ export async function createEnterpriseDatabase(connectionString) {
     // Bootstrap schema using a dedicated client
     const bootstrap = new Client({ connectionString });
     await bootstrap.connect();
-    await ensureSchema(bootstrap);
-    await bootstrap.end();
+    try {
+        await bootstrap.query("begin");
+        try {
+            await bootstrap.query("select pg_advisory_xact_lock($1::bigint)", [
+                ENTERPRISE_SCHEMA_BOOTSTRAP_LOCK_ID,
+            ]);
+            await ensureSchema(bootstrap);
+            await bootstrap.query("commit");
+        }
+        catch (error) {
+            await bootstrap.query("rollback").catch(() => undefined);
+            throw error;
+        }
+    }
+    finally {
+        await bootstrap.end();
+    }
+    async function runTransaction(fn, organizationId) {
+        const client = await pool.connect();
+        try {
+            await client.query("begin");
+            if (organizationId !== undefined) {
+                await client.query("select set_config('pi.organization_id', $1, true)", [organizationId]);
+            }
+            const result = await fn({ query: wrapClientQuery(client) });
+            await client.query("commit");
+            return result;
+        }
+        catch (error) {
+            await client.query("rollback");
+            throw error;
+        }
+        finally {
+            client.release();
+        }
+    }
     return {
         query: async (sql, params) => {
             const client = await pool.connect();
@@ -25,21 +61,12 @@ export async function createEnterpriseDatabase(connectionString) {
                 client.release();
             }
         },
-        transaction: async (fn) => {
-            const client = await pool.connect();
-            try {
-                await client.query("begin");
-                const result = await fn({ query: wrapClientQuery(client) });
-                await client.query("commit");
-                return result;
-            }
-            catch (error) {
-                await client.query("rollback");
-                throw error;
-            }
-            finally {
-                client.release();
-            }
+        transaction: (fn) => runTransaction(fn),
+        withOrganization: (organizationId, fn) => {
+            const normalized = organizationId.trim();
+            if (!normalized)
+                return Promise.reject(new Error("Organization ID is required"));
+            return runTransaction(fn, normalized);
         },
         close: async () => {
             await pool.end();
@@ -245,6 +272,64 @@ async function ensureSchema(client) {
     create index if not exists enterprise_oidc_login_flows_expiry_idx
       on enterprise_oidc_login_flows(expires_at)
       where consumed_at is null
+  `);
+    await applySchemaMigration(client, CORE_TENANT_RLS_MIGRATION, async () => {
+        await ensureCoreTenantPolicies(client);
+    });
+}
+async function applySchemaMigration(client, name, migrate) {
+    const applied = await client.query("select exists (select 1 from enterprise_schema_migrations where name = $1) as applied", [name]);
+    if (applied.rows[0]?.applied)
+        return;
+    await migrate();
+    await client.query("insert into enterprise_schema_migrations (name) values ($1)", [name]);
+}
+async function ensureCoreTenantPolicies(client) {
+    const organizationSetting = "nullif(current_setting('pi.organization_id', true), '')";
+    for (const table of ["enterprise_sessions", "enterprise_runs"]) {
+        await client.query(`alter table ${table} enable row level security`);
+        await client.query(`alter table ${table} force row level security`);
+        await client.query(`drop policy if exists ${table}_organization_isolation on ${table}`);
+        await client.query(`
+      create policy ${table}_organization_isolation on ${table}
+      for all
+      using (organization_id = ${organizationSetting})
+      with check (organization_id = ${organizationSetting})
+    `);
+    }
+    await client.query("alter table enterprise_session_entries enable row level security");
+    await client.query("alter table enterprise_session_entries force row level security");
+    await client.query("drop policy if exists enterprise_session_entries_organization_isolation on enterprise_session_entries");
+    await client.query(`
+    create policy enterprise_session_entries_organization_isolation on enterprise_session_entries
+    for all
+    using (exists (
+      select 1 from enterprise_sessions parent
+      where parent.id = session_id
+        and parent.organization_id = ${organizationSetting}
+    ))
+    with check (exists (
+      select 1 from enterprise_sessions parent
+      where parent.id = session_id
+        and parent.organization_id = ${organizationSetting}
+    ))
+  `);
+    await client.query("alter table enterprise_run_events enable row level security");
+    await client.query("alter table enterprise_run_events force row level security");
+    await client.query("drop policy if exists enterprise_run_events_organization_isolation on enterprise_run_events");
+    await client.query(`
+    create policy enterprise_run_events_organization_isolation on enterprise_run_events
+    for all
+    using (exists (
+      select 1 from enterprise_runs parent
+      where parent.id = run_id
+        and parent.organization_id = ${organizationSetting}
+    ))
+    with check (exists (
+      select 1 from enterprise_runs parent
+      where parent.id = run_id
+        and parent.organization_id = ${organizationSetting}
+    ))
   `);
 }
 //# sourceMappingURL=db.js.map

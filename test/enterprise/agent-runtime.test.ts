@@ -12,6 +12,9 @@ function fakeDb(row?: Record<string, unknown>): EnterpriseDatabase {
     async transaction<T>(fn: (tx: never) => Promise<T>) {
       return fn(this as never);
     },
+    async withOrganization<T>(_organizationId: string, fn: (tx: never) => Promise<T>) {
+      return fn(this as never);
+    },
     async close() {},
   };
 }

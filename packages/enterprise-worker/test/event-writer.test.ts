@@ -13,6 +13,9 @@ describe("createPgEventWriter", () => {
       async transaction() {
         throw new Error("not used");
       },
+      async withOrganization() {
+        throw new Error("not used");
+      },
       async close() {},
     };
     const writer = createPgEventWriter(db, "run-1");
