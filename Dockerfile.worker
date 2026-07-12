@@ -1,0 +1,41 @@
+# Worker sandbox — runs agent code in an isolated container
+# Usage: Built automatically by the control plane when PI_WORKER_MODE=docker
+FROM node:22.19.0-bookworm-slim
+
+WORKDIR /app
+
+ARG NPM_REGISTRY=https://registry.npmmirror.com
+
+# Install git (needed by coding agent tools)
+RUN apt-get -o Acquire::Retries=3 update \
+ && apt-get -o Acquire::Retries=3 install -y --no-install-recommends git \
+ && rm -rf /var/lib/apt/lists/*
+
+# Install the worker's complete production dependency graph, including local
+# protocol and session-broker workspaces.
+COPY package.json package-lock.json ./
+COPY packages/enterprise-worker/package.json ./packages/enterprise-worker/
+COPY packages/enterprise-protocol/package.json ./packages/enterprise-protocol/
+COPY packages/enterprise-session-broker/package.json ./packages/enterprise-session-broker/
+RUN npm config set registry "$NPM_REGISTRY" \
+ && npm ci --omit=dev --workspace @pi-web/enterprise-worker --include-workspace-root=false \
+ && npm cache clean --force
+
+# Copy compiled workspace code after dependency installation for better layer caching.
+COPY packages/enterprise-worker/dist ./packages/enterprise-worker/dist
+COPY packages/enterprise-protocol/dist ./packages/enterprise-protocol/dist
+COPY packages/enterprise-session-broker/dist ./packages/enterprise-session-broker/dist
+
+# Create non-root user for execution
+RUN addgroup --system --gid 1001 pibot \
+ && adduser --system --uid 1001 --ingroup pibot pibot \
+ && mkdir -p /workspace /run \
+ && chown pibot:pibot /workspace /run
+
+USER pibot
+WORKDIR /workspace
+
+ENV NODE_ENV=production
+ENV PI_WORKER_SANDBOX=true
+
+CMD ["node", "/app/packages/enterprise-worker/dist/main.js"]

@@ -1,0 +1,43 @@
+import { NextResponse } from "next/server";
+import { sanitizeError } from "@/lib/api-errors";
+import { statSync, type Stats } from "fs";
+import { isAbsolute, resolve } from "path";
+import { allowFileRoot } from "@/lib/file-access";
+
+function normalizeCwd(cwd: string): string {
+  return isAbsolute(cwd) ? cwd : resolve(cwd);
+}
+
+// POST /api/cwd/validate  body: { cwd: string }
+// Validates a candidate workspace before the UI selects it.
+export async function POST(req: Request) {
+  try {
+    const body = await req.json() as { cwd?: unknown };
+    const cwd = typeof body.cwd === "string" ? body.cwd.trim() : "";
+
+    if (!cwd) {
+      return NextResponse.json({ error: "Path is required" }, { status: 400 });
+    }
+    if (cwd === "~" || cwd.startsWith("~/")) {
+      return NextResponse.json({ error: "Home-relative paths must be expanded by the client" }, { status: 400 });
+    }
+
+    const normalizedCwd = normalizeCwd(cwd);
+    let stat: Stats;
+    try {
+      stat = statSync(normalizedCwd);
+    } catch {
+      return NextResponse.json({ error: `Directory does not exist: ${cwd}` }, { status: 400 });
+    }
+
+    if (!stat.isDirectory()) {
+      return NextResponse.json({ error: `Path is not a directory: ${cwd}` }, { status: 400 });
+    }
+
+    allowFileRoot(normalizedCwd);
+    return NextResponse.json({ success: true, cwd: normalizedCwd });
+  } catch (error) {
+    return NextResponse.json({ error: sanitizeError(error) }, { status: 500 });
+  }
+}
+

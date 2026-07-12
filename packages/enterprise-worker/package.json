@@ -1,0 +1,23 @@
+{
+  "name": "@pi-web/enterprise-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "pi-enterprise-worker": "./dist/main.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "npm run build --workspace @pi-web/enterprise-protocol && tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@earendil-works/pi-agent-core": "0.80.6",
+    "@earendil-works/pi-ai": "0.80.6",
+    "@earendil-works/pi-coding-agent": "0.80.6",
+    "@pi-web/enterprise-protocol": "0.1.0",
+    "@pi-web/enterprise-session-broker": "0.1.0"
+  }
+}
